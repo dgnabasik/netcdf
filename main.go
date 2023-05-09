@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"netcdf/iotdb"
+	"github.com/dgnabasik/netcdf/iotdb"
 
 	"github.com/apache/iotdb-client-go/client"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"

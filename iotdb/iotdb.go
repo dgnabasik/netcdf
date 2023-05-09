@@ -38,7 +38,7 @@ const (
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339","kwh,kilowatt-hour","unicode,string","unixutc,long","kW,kilowatt","°F,Farenheit","°C,Celsius","%rh,percent relative humidity" }
+// var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339","kWh,kilowatt-hour","unicode,string","unixutc,long","kW,kilowatt","°F,Farenheit","°C,Celsius","%rh,percent relative humidity" }
 // var recommendedUnits = []string{"km,kilometers","mb,millibars", "degrees,360",""
 
 var timeSeriesCommands = []string{"drop", "create", "delete", "insert", "example"}
@@ -82,6 +82,7 @@ func testRemoteAddressPortsOpen(host string, ports []string) (bool, error) {
 	return true, nil
 }
 
+// For dates different more than 1 day apart.
 func TimeDifference(a, b time.Time) (year, month, day, hour, min, sec int) {
 	if a.Location() != b.Location() {
 		b = b.In(a.Location())
