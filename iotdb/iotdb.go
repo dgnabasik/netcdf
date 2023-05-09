@@ -1,7 +1,7 @@
 package main //<<iotdb
 
 // Every session.* statement had a checkError() wrapper removed. Do NOT change the source data file.
-// Preconditions: create database root.datasets;
+// Preconditions: create database root.datasets. You cannot do a Github fork of Go code.
 // A storage group is related to a real world entity such as factory, location, country, etc.
 // Add last column of DatasetName (TEXT) to distinguish 1-minute, 15-minute, 60 minute sampling intervals.
 import (
@@ -26,7 +26,6 @@ import (
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/apache/thrift/lib/go/thrift"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
-	graphdb "github.com/dgnabasik/netcdf/graphdb"
 )
 
 const (
@@ -36,47 +35,6 @@ const (
 	timeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ not quite RFC3339 format.
 	LastColumnName = "DatasetName"
 )
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-// This struct is returned from FindClosestSarefEntity().	DUPLICATE
-type EntityVariableAlias struct {
-	EntityName     string             `json:"Entityname"`
-	NameTokens     []string           `json:"nametokens"`
-	SarefEntityIRI map[string]float64 `json:"sarefentityiri"`
-}
-
-func (eva EntityVariableAlias) ParentClassIRI() string {
-	for key := range eva.SarefEntityIRI {
-		return key
-	}
-	return ""
-}
-
-func FindClosestSarefEntity(varName string) (EntityVariableAlias, error) {
-	eva := EntityVariableAlias{EntityName: varName}
-	isOpen, graphdbURL := graphdb.Init_GraphDB()
-	if !isOpen {
-		return eva, errors.New("Unable to access GraphDB at " + graphdbURL)
-	}
-	/* var sarefExtensions = make([]string, 0)
-	for _, value := range graphdb.SarefMap {
-		sarefExtensions = append(sarefExtensions, value)
-	}
-	eva.ParseEntityVariable() // Assigns eva.NameTokens.
-	similarOutputs := make([]graphdb.Similarity, 0)
-	for _, token := range eva.NameTokens {
-		for _, saref := range sarefExtensions {
-			entityIRI := saref + token
-			similars := graphdb.ExtractSimilarEntities(entityIRI) // []graphdb.Similarity
-			similarOutputs = append(similarOutputs, similars...)
-		}
-	}
-	if len(similarOutputs) > 0 {
-		eva.SarefEntityIRI = map[string]float64{similarOutputs[0].Uri: similarOutputs[0].Score}
-	} */
-	return eva, nil
-}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -535,7 +493,7 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
 	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
 
-	eva, _ := FindClosestSarefEntity("variableName") // (EntityVariableAlias, error)
+	//eva, _ := FindClosestSarefEntity("variableName") // (EntityVariableAlias, error)
 
 	output[16] = OutputLocation + iot.DatasetName + "#> a dctype:Dataset ;"
 	output[17] = `dcterms:title "` + iot.Description + `"@en ;`
@@ -548,7 +506,7 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 	output[22] = "s4data:" + iot.DatasetName + " rdf:type owl:Class ;"
 	output[23] = `rdfs:comment "` + iot.Description + `"@en ;`
 	output[24] = `rdfs:label "` + iot.DatasetName + `"@en .`
-	output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
+	//output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
 	// Add standard Measurement properties
 	output[26] = "[ rdf:type owl:Restriction ;"
 	output[27] = "owl:onProperty saref:measurementMadeBy ;"
@@ -637,9 +595,9 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			iot.ExecuteInsertStatement() // do not log this 6.1Gb statement.
 
 		case "example": // output saref ttl class file:
-			ttlLines := iot.Format_TurtleOntology()
+			/*<<< ttlLines := iot.Format_TurtleOntology()
 			err := fs.WriteTextLines(ttlLines, iot.DataFilePath+".ttl", false)
-			checkErr("WriteTextLines(ttl.output", err)
+			checkErr("WriteTextLines(ttl.output", err)*/
 
 		} // switch
 		fmt.Println("Timeseries " + command + " completed.")

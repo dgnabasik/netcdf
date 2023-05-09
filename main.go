@@ -19,8 +19,6 @@ import (
 	"strconv"
 	"strings"
 
-	"netcdf/graphdb"
-	//"netcdf/iotdb"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
 )
 
