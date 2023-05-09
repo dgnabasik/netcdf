@@ -689,29 +689,29 @@ func main() {
 
 	json, err := netcdf.Format_Json()
 	checkErr("netcdf.Format_Json", err)
-	err = WriteTextLines(json, inputFile+".json", false)
-	checkErr("WriteTextLines(json)", err)
+	err = fs.WriteTextLines(json, inputFile+".json", false)
+	checkErr("fs.WriteTextLines(json)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".json", json)
 	checkErr("UploadFile: "+inputFile+".json", err)
 
 	/*<<< DIRECT CREATE & COPY: 	iotdbCreate := netcdf.Format_DBcreate()
-	err = WriteTextLines(iotdbCreate, inputFile+".iotdb.create", false)
-	checkErr("WriteTextLines(iotdb.create)", err)
+	err = fs.WriteTextLines(iotdbCreate, inputFile+".iotdb.create", false)
+	checkErr("fs.WriteTextLines(iotdb.create)", err)
 
 	iotdbInsert, dataStats := netcdf.Format_DBinsert()
-	err = WriteTextLines(iotdbInsert, inputFile+".iotdb.insert", false)
-	checkErr("WriteTextLines(iotdb.insert)", err)
+	err = fs.WriteTextLines(iotdbInsert, inputFile+".iotdb.insert", false)
+	checkErr("fs.WriteTextLines(iotdb.insert)", err)
 	fmt.Println(len(dataStats)) */
 
 	ontology := netcdf.Format_TurtleOntology()
-	err = WriteTextLines(ontology, inputFile+".ttl", false)
-	checkErr("WriteTextLines(ttl)", err)
+	err = fs.WriteTextLines(ontology, inputFile+".ttl", false)
+	checkErr("fs.WriteTextLines(ttl)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".ttl", ontology)
 	checkErr("UploadFile: "+inputFile+".ttl", err)
 
 	sparqlQuery := netcdf.Format_SparqlQuery()
-	err = WriteTextLines(sparqlQuery, inputFile+".sparql", false)
-	checkErr("WriteTextLines(ttl)", err)
+	err = fs.WriteTextLines(sparqlQuery, inputFile+".sparql", false)
+	checkErr("fs.WriteTextLines(ttl)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".sparql", sparqlQuery)
 	checkErr("UploadFile: "+inputFile+".sparql", err)
 

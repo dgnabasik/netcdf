@@ -1,7 +1,8 @@
 package main //<<iotdb
 
 // Every session.* statement had a checkError() wrapper removed. Do NOT change the source data file.
-// Preconditions: create database root.datasets;  Need to integrate storage groups.
+// Preconditions: create database root.datasets;
+// A storage group is related to a real world entity such as factory, location, country, etc.
 // Add last column of DatasetName (TEXT) to distinguish 1-minute, 15-minute, 60 minute sampling intervals.
 import (
 	"encoding/csv"
@@ -230,7 +231,7 @@ func Initialize_IoTDbDataFile(programArgs []string) (IoTDbDataFile, error) {
 	return iotdbDataFile, nil
 }
 
-// Include percentage of missing data, which can be got from a SELECT count(*) from root.datasets.etsi.household_data_60min_singleindex;
+// Include percentage of missing data, which can be got from a SELECT count(*) from root.datasets.etsi.household_data_1min_singleindex;
 func (iot *IoTDbDataFile) OutputDescription(displayColumnInfo bool) string {
 	const crlf = "\n"
 	var sb strings.Builder
@@ -429,12 +430,13 @@ func (iot *IoTDbDataFile) ExecuteInsertStatement() { // []string {
 			}
 			insert.WriteString(sb.String())
 		}
-		insertStatement := []string{insert.String() + ";"}
+		//insertStatement := []string{insert.String() + ";"}
 		/*err := fs.WriteTextLines(insertStatement, iot.DataFilePath+".iotdb.insert", false)
 		if err != nil {
 			fmt.Println(err)
 		}*/
-		_, err := session.ExecuteBatchStatement(insertStatement) // (r *common.TSStatus, err error)
+		//_, err := session.ExecuteBatchStatement(insertStatement) // (r *common.TSStatus, err error)
+		_, err := session.ExecuteNonQueryStatement(insert.String() + ";")
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -489,7 +491,8 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 				sb.WriteString(item.MeasurementName + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			_, err := session.ExecuteBatchStatement([]string{sql})
+			//_, err := session.ExecuteBatchStatement([]string{sql})
+			_, err := session.ExecuteNonQueryStatement(sql)
 			checkErr("session.ExecuteBatchStatement(createStatement)", err)
 			//session.CreateAlignedTimeseries(DatasetPrefix+iot.DatasetName, measurementNames, dataTypes, encodings, compressors, measurementAliases)
 
@@ -506,6 +509,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			iot.ExecuteInsertStatement() // do not log this 6.1Gb statement.
 
 		case "example": //<<< output saref owl class file:
+
 		} // switch
 		fmt.Println("Timeseries " + command + " completed.")
 	} // for

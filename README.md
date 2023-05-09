@@ -2,7 +2,7 @@ README.md for netcdf repository:: 2023-05-08
 
 Program goals:
 1) Provide a customizable streaming sensor data publish/subscribe server for comsumption by Python, Golang, Java, Julia clients.
-2) Automatically generate SAREF-derived OWL class per data stream source.
+2) Automatically generate SAREF-derived OWL class per data stream source; semantically enrich SAREF data.
 3) Provide test data for digital-twin simulations. 
 4) Demonstrate the utility of Named Graphs to allow the filtering and combination of data from different data streams.
 
