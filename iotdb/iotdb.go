@@ -26,13 +26,59 @@ import (
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/apache/thrift/lib/go/thrift"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
+	graphdb "github.com/dgnabasik/netcdf/graphdb"
 )
 
 const (
+	SarefEtsiOrg   = "<https://saref.etsi.org/" // does not include trailing >
+	OutputLocation = SarefEtsiOrg + "datasets/examples/"
 	DatasetPrefix  = "root.datasets.etsi."
 	timeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ not quite RFC3339 format.
 	LastColumnName = "DatasetName"
 )
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+// This struct is returned from FindClosestSarefEntity().	DUPLICATE
+type EntityVariableAlias struct {
+	EntityName     string             `json:"Entityname"`
+	NameTokens     []string           `json:"nametokens"`
+	SarefEntityIRI map[string]float64 `json:"sarefentityiri"`
+}
+
+func (eva EntityVariableAlias) ParentClassIRI() string {
+	for key := range eva.SarefEntityIRI {
+		return key
+	}
+	return ""
+}
+
+func FindClosestSarefEntity(varName string) (EntityVariableAlias, error) {
+	eva := EntityVariableAlias{EntityName: varName}
+	isOpen, graphdbURL := graphdb.Init_GraphDB()
+	if !isOpen {
+		return eva, errors.New("Unable to access GraphDB at " + graphdbURL)
+	}
+	/* var sarefExtensions = make([]string, 0)
+	for _, value := range graphdb.SarefMap {
+		sarefExtensions = append(sarefExtensions, value)
+	}
+	eva.ParseEntityVariable() // Assigns eva.NameTokens.
+	similarOutputs := make([]graphdb.Similarity, 0)
+	for _, token := range eva.NameTokens {
+		for _, saref := range sarefExtensions {
+			entityIRI := saref + token
+			similars := graphdb.ExtractSimilarEntities(entityIRI) // []graphdb.Similarity
+			similarOutputs = append(similarOutputs, similars...)
+		}
+	}
+	if len(similarOutputs) > 0 {
+		eva.SarefEntityIRI = map[string]float64{similarOutputs[0].Uri: similarOutputs[0].Score}
+	} */
+	return eva, nil
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
 
 // var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339","kwh,kilowatt-hour","unicode,string","unixutc,long","kW,kilowatt","°F,Farenheit","°C,Celsius","%rh,percent relative humidity" }
 // var recommendedUnits = []string{"km,kilometers","mb,millibars", "degrees,360",""
@@ -191,6 +237,7 @@ func (mi MeasurementItem) ToString() string {
 }
 
 type IoTDbDataFile struct {
+	Description        string                     `json:"description"` // <<<
 	DataFilePath       string                     `json:"datafilepath"`
 	DataFileType       string                     `json:"datafiletype"`
 	SummaryFilePath    string                     `json:"summaryfilepath"`
@@ -397,7 +444,7 @@ func getStartTime(someTime string) time.Time {
 // IoTDB > insert into root.sg1.d1(time, s1, s2) aligned values(2, 2, 2), (3, 3, 3)
 // Automatically inserts long time column as first column (which should be UTC)
 // Avoid returning huge result. Save in blocks.
-func (iot *IoTDbDataFile) ExecuteInsertStatement() { // []string {
+func (iot *IoTDbDataFile) ExecuteInsertStatement() {
 	const blockSize = 163840 // safe
 	nBlocks := len(iot.Dataset)/(blockSize) + 1
 	for block := 0; block < nBlocks; block++ {
@@ -432,17 +479,11 @@ func (iot *IoTDbDataFile) ExecuteInsertStatement() { // []string {
 		}
 		//insertStatement := []string{insert.String() + ";"}
 		/*err := fs.WriteTextLines(insertStatement, iot.DataFilePath+".iotdb.insert", false)
-		if err != nil {
-			fmt.Println(err)
-		}*/
-		//_, err := session.ExecuteBatchStatement(insertStatement) // (r *common.TSStatus, err error)
-		_, err := session.ExecuteNonQueryStatement(insert.String() + ";")
-		if err != nil {
-			fmt.Println(err)
-		}
+		checkErr("WriteTextLines((insertStatement)", err) */
+		_, err := session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
+		checkErr("session.ExecuteNonQueryStatement(insertStatement)", err)
 		time.Sleep(1 * time.Second)
 		// For large # of inserts: session.ExecuteBatchStatement(insertStatement): write tcp 127.0.0.1:43400->127.0.0.1:6667: write: connection reset by peer
-		//checkErr("session.ExecuteBatchStatement(insertStatement)", err)
 	}
 	fmt.Println()
 }
@@ -470,6 +511,95 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 	return "TEXT", "PLAIN", "SNAPPY"
 }
 
+// Produce DatatypeProperty ontology from dataset.
+// Make the dataset its own Class and loadable into GraphDB as Named Graph.
+// Special handling: "dateTime", "XMLLiteral", "anyURI"
+func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
+	var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
+	output := make([]string, 256)
+	output[0] = "@prefix s4data: " + OutputLocation + "> ."
+	output[1] = "@prefix example: " + OutputLocation + iot.DatasetName + "/> ."
+
+	output[2] = "@prefix foaf: <http://xmlns.com/foaf/spec/#> ."
+	output[3] = "@prefix geosp: <http://www.opengis.net/ont/geosparql#> ."
+	output[4] = "@prefix obo: <http://purl.obolibrary.org/obo/> ."
+	output[5] = "@prefix org: <https://schema.org/> ."
+	output[6] = "@prefix owl: <http://www.w3.org/2002/07/owl#> ."
+	output[7] = "@prefix org: <https://schema.org/> ."
+	output[8] = "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> ."
+	output[9] = "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> ."
+	output[10] = "@prefix saref: " + SarefEtsiOrg + "core/> ."
+	output[11] = "@prefix ssn: <http://www.w3.org/ns/ssn/> ."
+	output[12] = "@prefix time: <http://www.w3.org/2006/time#> ."
+	output[13] = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> ."
+	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
+	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
+
+	eva, _ := FindClosestSarefEntity("variableName") // (EntityVariableAlias, error)
+
+	output[16] = OutputLocation + iot.DatasetName + "#> a dctype:Dataset ;"
+	output[17] = `dcterms:title "` + iot.Description + `"@en ;`
+	output[18] = `dcterms:description "` + iot.DatasetName + `"@en .`
+	output[19] = "dcterms:license <https://forge.etsi.org/etsi-software-license> ;"
+	output[20] = "dcterms:conformsTo <https://saref.etsi.org/core/v3.1.1/> ;"
+	output[21] = "dcterms:conformsTo <https://saref.etsi.org/saref4core/v3.1.1/> ;" //<<< SarefEtsiOrg + parent class
+
+	output[21] = "### " + OutputLocation + iot.DatasetName
+	output[22] = "s4data:" + iot.DatasetName + " rdf:type owl:Class ;"
+	output[23] = `rdfs:comment "` + iot.Description + `"@en ;`
+	output[24] = `rdfs:label "` + iot.DatasetName + `"@en .`
+	output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
+	// Add standard Measurement properties
+	output[26] = "[ rdf:type owl:Restriction ;"
+	output[27] = "owl:onProperty saref:measurementMadeBy ;"
+	output[28] = "owl:someValuesFrom saref:Device"
+	output[29] = "] ,"
+	output[30] = "[ rdf:type owl:Restriction ;"
+	output[31] = "owl:onProperty saref:hasConfidence ;"
+	output[32] = "owl:someValuesFrom saref:Confidence"
+	output[33] = "] ,"
+	output[34] = "[ rdf:type owl:Restriction ;"
+	output[35] = "owl:onProperty saref:isMeasuredIn ;"
+	output[36] = "owl:allValuesFrom saref:UnitOfMeasure"
+	output[37] = "] ,"
+	output[38] = "[ rdf:type owl:Restriction ;"
+	output[39] = "owl:onProperty saref:relatesToProperty ;"
+	output[40] = "owl:allValuesFrom saref:Property"
+	output[41] = "] ,"
+	output[42] = "[ rdf:type owl:Restriction ;"
+	output[43] = "owl:onProperty saref:isMeasuredIn ;"
+	output[44] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
+	output[45] = "owl:onClass saref:UnitOfMeasure:"
+	output[46] = "] ,"
+	output[47] = "[ rdf:type owl:Restriction ;"
+	output[48] = "owl:onProperty saref:relatesToProperty ;"
+	output[49] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
+	output[50] = "owl:onClass saref:Property"
+	output[51] = "] ,"
+	output[52] = "[ rdf:type owl:Restriction ;"
+	output[53] = "owl:onProperty saref:hasTimestamp ;"
+	output[54] = "owl:allValuesFrom xsd:dateTime"
+	output[55] = "] ,"
+	output[56] = "[ rdf:type owl:Restriction ;"
+	output[57] = "owl:onProperty saref:hasValue ;"
+	output[58] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
+	output[59] = "owl:onDataRange xsd:float"
+	output[60] = "] ; ."
+	index := 60
+	// add specific field names as DatatypeProperties.
+	for _, item := range iot.Measurements {
+		index++
+		output[index] = "[ rdf:type owl:Restriction ;"
+		index++
+		output[index] = "owl:onProperty :has" + item.MeasurementName + " ;" // item.MeasurementAlias, item.Units
+		index++
+		output[index] = "owl:allValuesFrom xsd:" + xsdDatatypeMap[item.MeasurementType]
+		index++
+		output[index] = "] ; ."
+	}
+	return output
+}
+
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
 // create timeseries root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
 func (iot *IoTDbDataFile) ProcessTimeseries() error {
@@ -479,7 +609,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 		case "drop": // timeseries schema; uses multiple statements;
 			for _, item := range iot.Measurements {
 				cmd := DatasetPrefix + iot.DatasetName + "." + item.MeasurementName
-				fmt.Println(strings.ToUpper(command) + " " + cmd) // log this
+				//fmt.Println(strings.ToUpper(command) + " " + cmd) // log this
 				deleteTimeseries(cmd)
 			}
 
@@ -491,10 +621,8 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 				sb.WriteString(item.MeasurementName + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			//_, err := session.ExecuteBatchStatement([]string{sql})
 			_, err := session.ExecuteNonQueryStatement(sql)
-			checkErr("session.ExecuteBatchStatement(createStatement)", err)
-			//session.CreateAlignedTimeseries(DatasetPrefix+iot.DatasetName, measurementNames, dataTypes, encodings, compressors, measurementAliases)
+			checkErr("session.ExecuteNonQueryStatement(createStatement)", err)
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			deleteStatements := make([]string, 0)
@@ -508,7 +636,10 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			//iot.SaveInsertStatements()   // write multiple statements to disk for review, but execute single statement since somewhat faster:
 			iot.ExecuteInsertStatement() // do not log this 6.1Gb statement.
 
-		case "example": //<<< output saref owl class file:
+		case "example": // output saref ttl class file:
+			ttlLines := iot.Format_TurtleOntology()
+			err := fs.WriteTextLines(ttlLines, iot.DataFilePath+".ttl", false)
+			checkErr("WriteTextLines(ttl.output", err)
 
 		} // switch
 		fmt.Println("Timeseries " + command + " completed.")

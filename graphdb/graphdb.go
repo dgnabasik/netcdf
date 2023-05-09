@@ -63,14 +63,14 @@ type Similarity struct { // exported
 }
 
 // {Entity:Entity name, Match:Extension name, Score:Entity type} Not all fields displayed.
-func (fs Similarity) ToString() string {
+func (sim Similarity) ToString() string {
 	const sep = "\n"
-	return "EntityName : " + fs.Entity + sep +
-		"Entity URI : " + fs.Uri + sep +
+	return "EntityName : " + sim.Entity + sep +
+		"Entity URI : " + sim.Uri + sep +
 		//"Match      : " + fs.Match + sep +
-		"Score      : " + strconv.FormatFloat(fs.Score, 'f', 4, 64) + sep +
-		"Comment    : " + fs.Comment + sep +
-		"SubClassOf : " + sep + "  " + strings.Join(strings.Split(fs.SubClassOf, " "), sep+"  ")
+		"Score      : " + strconv.FormatFloat(sim.Score, 'f', 4, 64) + sep +
+		"Comment    : " + sim.Comment + sep +
+		"SubClassOf : " + sep + "  " + strings.Join(strings.Split(sim.SubClassOf, " "), sep+"  ")
 }
 
 // use as maps
@@ -233,8 +233,8 @@ func queryGraphDB(query string) (JsonSimilarity, string) {
 	return jsonSimilarity, graphDBparameters.DefaultDbInstanceUrl
 }
 
-func formatFloat(fs string) float64 {
-	f, err := strconv.ParseFloat(fs, 64)
+func formatFloat(str string) float64 {
+	f, err := strconv.ParseFloat(str, 64)
 	if err != nil {
 		return zero
 	}

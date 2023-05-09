@@ -6,7 +6,7 @@ package main
 // /usr/bin/ncdump -c Jan_clean.nc		==> gives header + indexed {id, time} data
 // https://docs.unidata.ucar.edu/nug/current/index.html		Golang supports compressed file formats {rardecode(rar), gz/gzip, zlib, lzw, bzip2}
 // Curated data: Each data row is indexed by {a house ID, a time value}. How to import the data into GraphDB (as a Named Graph)?
-// nc files: ./github.com/go-native-netcdf/netcdf/*.nc	./github.com/netcdf-c/*.nc	./Documents/digital-twins/ecobee/*.nc
+// nc files: ./github.com/go-native-netcdf/netcdf/*.nc	./github.com/netcdf-c/*.nc	./Documents/digital-twins/Entity/*.nc
 // h5 files: ./Documents/digital-twins/AMP/AMPds2.h5	./github.com/netcdf-c/nc_test4/*.h5	./github.com/nci-doe-data-sharing/flaskProject/mt-cnn/mt_cnn_model.h5 ./github.com/go-native-netcdf/netcdf/hdf5/testdata
 // csv files: many.
 import (
@@ -31,45 +31,35 @@ const ( // these do not include trailing >
 
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 
-// General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs.
-type DataStatistic struct {
-	StandardName      string         `json:"standardname"`
-	NumberOfValues    int            `json:"numberofvalues"`
-	NumDistinctValues int            `json:"numdistinctvalues"`
-	MinimumValue      string         `json:"minimumvalue"`
-	MaximumValue      string         `json:"maximumvalue"`
-	FrequencyMap      map[string]int `json:"frequencymap"`
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 // This struct is returned from FindClosestSarefEntity().
-type EcobeeVariableAlias struct {
-	EcobeeName     string             `json:"ecobeename"`
+type EntityVariableAlias struct {
+	EntityName     string             `json:"Entityname"`
 	NameTokens     []string           `json:"nametokens"`
 	SarefEntityIRI map[string]float64 `json:"sarefentityiri"`
 }
 
-func (eva EcobeeVariableAlias) ParentClassIRI() string {
+func (eva EntityVariableAlias) ParentClassIRI() string {
 	for key := range eva.SarefEntityIRI {
 		return key
 	}
 	return ""
 }
 
-func (eva EcobeeVariableAlias) ToString() string {
+func (eva EntityVariableAlias) ToString() string {
 	const sep = "\n"
-	str := "Name  : " + eva.EcobeeName + sep + "Tokens: " + strings.Join(eva.NameTokens, "  ") + sep + "IRI   : "
+	str := "Name  : " + eva.EntityName + sep + "Tokens: " + strings.Join(eva.NameTokens, "  ") + sep + "IRI   : "
 	for k, v := range eva.SarefEntityIRI {
 		str += k + " : " + strconv.FormatFloat(v, 'f', 4, 64) + sep
 	}
 	return str
 }
 
-// Parse words from variable names: camelCase, underscores, ignore digits. Ecobee index names use lowercase. Assigns eva.NameTokens.
-func (eva *EcobeeVariableAlias) ParseEcobeeVariable() {
+// Parse words from variable names: camelCase, underscores, ignore digits. Entity index names use lowercase. Assigns eva.NameTokens.
+func (eva *EntityVariableAlias) ParseEntityVariable() {
 	re := regexp.MustCompile(`[A-Z][^A-Z]*`)
-	tokens := strings.Split(eva.EcobeeName, "_")
+	tokens := strings.Split(eva.EntityName, "_")
 	camels := make([]string, 0)
 	for ndx := range tokens {
 		for inner := 0; inner <= 9; inner++ {
@@ -92,16 +82,16 @@ func (eva *EcobeeVariableAlias) ParseEcobeeVariable() {
 	copy(eva.NameTokens, tokens) // dst, src
 }
 
-// Contains an entire month's worth of Ecobee data for every Variable where each row is indexed by {HouseIndex+LongtimeIndex}.
-type EcobeeCleanData struct {
+// Contains an entire month's worth of Entity data for every Variable where each row is indexed by {HouseIndex+LongtimeIndex}.
+type EntityCleanData struct {
 	HouseIndex    []string   `json:"houseindex"`
 	LongtimeIndex []string   `json:"longtimeindex"`
 	Data          [][]string `json:"data"`
 }
 
-// EcobeeCleanData initializer.
-func MakeEcobeeCleanData(rows int, vars []CDFvariable) EcobeeCleanData {
-	ecd := EcobeeCleanData{}
+// EntityCleanData initializer.
+func MakeEntityCleanData(rows int, vars []CDFvariable) EntityCleanData {
+	ecd := EntityCleanData{}
 	cols := len(vars)
 	ecd.Data = make([][]string, rows) // initialize a slice of rows slices
 	for i := 0; i < rows; i++ {
@@ -139,7 +129,7 @@ type NetCDF struct {
 	Input_files      string         `json:"input_files"`
 	History          string         `json:"history"`
 	Variables        []CDFvariable  `json:"variables"`
-	HouseIndices     []string       `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
+	HouseIndices     []string       `json:"houseindices"`    // these unique 2 indices are specific to Entity datasets.
 	LongtimeIndices  []string       `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
 }
 
@@ -212,8 +202,8 @@ func (cdf NetCDF) Format_Json() ([]string, error) {
 	return lines, nil
 }
 
-// CREATE TIMESERIES root.datasets.etsi.Ecobee_clean_5min.HVAC_Mode with datatype=INT32, encoding=RLE;
-// prefix: root.datasets.etsi.Ecobee_clean_5min
+// CREATE TIMESERIES root.datasets.etsi.Entity_clean_5min.HVAC_Mode with datatype=INT32, encoding=RLE;
+// prefix: root.datasets.etsi.Entity_clean_5min
 func (cdf NetCDF) Format_DBcreate() []string {
 	var cdfTypeMap = map[string]string{"string": "TEXT", "double": "DOUBLE", "int": "INT32", "int64": "INT64", "bool": "BOOLEAN"} // map CDF to IotDB datatypes.
 	var encodeMap = map[string]string{"string": "PLAIN", "double": "RLE", "int": "RLE", "int64": "RLE", "bool": "PLAIN"}
@@ -236,10 +226,17 @@ func (cdf NetCDF) FormattedColumnNames() string {
 	return str
 }
 
-// INSERT multi-column data at the same time point: INSERT INTO root.etsi.Ecobee_clean_5min(timestamp, status, hardware) VALUES (2, false, 'v2');
-// INSERT multi-rows at once: INSERT INTO root.etsi.Ecobee_clean_5min(timestamp, status, hardware) VALUES (3, false, 'v3'),(4, true, 'v4');
-// *** Timestamps needed in first column when inserting multi-rows.
-// TODO: Have to read the rest of the data from the *.nc files.
+// General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs.
+type DataStatistic struct {
+	StandardName      string         `json:"standardname"`
+	NumberOfValues    int            `json:"numberofvalues"`
+	NumDistinctValues int            `json:"numdistinctvalues"`
+	MinimumValue      string         `json:"minimumvalue"`
+	MaximumValue      string         `json:"maximumvalue"`
+	FrequencyMap      map[string]int `json:"frequencymap"`
+}
+
+// TODO: Read the rest of the data from the *.nc files.
 // type DataStatistic struct { NumDistinctValues int    `json:"numdistinctvalues"`  insert into map.
 func (cdf NetCDF) Format_DBinsert() ([]string, []DataStatistic) {
 	lines := make([]string, 0)
@@ -387,8 +384,8 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 // An exact match will return a score of about 1.0. This is the only function that calls the graphdb package.
 // # $1=https://saref.etsi.org/core/AbsolutePosition
 // curl -G -H "Accept:application/sparql-results+json" -d query=PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0ASELECT%20%3Fentity%20%3Fscore%20%7B%0A%3Fsearch%20a%20inst%3Amerged_sim_ndx%20%3B%0Apsi%3AsearchEntity%20%3C" + $1 + "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%209%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A http://localhost:7200/repositories/merged
-func FindClosestSarefEntity(varName string) (EcobeeVariableAlias, error) {
-	eva := EcobeeVariableAlias{EcobeeName: varName}
+func FindClosestSarefEntity(varName string) (EntityVariableAlias, error) {
+	eva := EntityVariableAlias{EntityName: varName}
 	isOpen, graphdbURL := graphdb.Init_GraphDB()
 	if !isOpen {
 		return eva, errors.New("Unable to access GraphDB at " + graphdbURL)
@@ -397,7 +394,7 @@ func FindClosestSarefEntity(varName string) (EcobeeVariableAlias, error) {
 	for _, value := range graphdb.SarefMap {
 		sarefExtensions = append(sarefExtensions, value)
 	}
-	eva.ParseEcobeeVariable() // Assigns eva.NameTokens.
+	eva.ParseEntityVariable() // Assigns eva.NameTokens.
 	similarOutputs := make([]graphdb.Similarity, 0)
 	for _, token := range eva.NameTokens {
 		for _, saref := range sarefExtensions {
@@ -467,7 +464,7 @@ func prettifyString(str string) string {
 	return s
 }
 
-// Parse output from /usr/bin/ncdump -c Jan_clean.nc	Specific to Ecobee datasets.
+// Parse Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
 func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 	netcdf := NetCDF{}
 	lines, err := fs.ReadTextLines(fname, false)
@@ -673,7 +670,7 @@ func main() {
 	if len(os.Args) < 3 {
 
 		fmt.Println("Specify 1) path to single *.var file, and 2) CDF file type {HDF5, netCDF-4, classic}.")
-		fmt.Println("3) Optionally specify the unique dataset identifier; e.g. root.datasets.etsi.Ecobee_clean_5min")
+		fmt.Println("3) Optionally specify the unique dataset identifier; e.g. root.datasets.etsi.Entity_clean_5min")
 		os.Exit(1)
 	}
 	inputFile := os.Args[1]
@@ -694,15 +691,6 @@ func main() {
 	err = UploadFile(DataSetPrefix+inputFile+".json", json)
 	checkErr("UploadFile: "+inputFile+".json", err)
 
-	/*<<< DIRECT CREATE & COPY: 	iotdbCreate := netcdf.Format_DBcreate()
-	err = fs.WriteTextLines(iotdbCreate, inputFile+".iotdb.create", false)
-	checkErr("fs.WriteTextLines(iotdb.create)", err)
-
-	iotdbInsert, dataStats := netcdf.Format_DBinsert()
-	err = fs.WriteTextLines(iotdbInsert, inputFile+".iotdb.insert", false)
-	checkErr("fs.WriteTextLines(iotdb.insert)", err)
-	fmt.Println(len(dataStats)) */
-
 	ontology := netcdf.Format_TurtleOntology()
 	err = fs.WriteTextLines(ontology, inputFile+".ttl", false)
 	checkErr("fs.WriteTextLines(ttl)", err)
@@ -714,5 +702,4 @@ func main() {
 	checkErr("fs.WriteTextLines(ttl)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".sparql", sparqlQuery)
 	checkErr("UploadFile: "+inputFile+".sparql", err)
-
 }
