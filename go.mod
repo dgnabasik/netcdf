@@ -4,12 +4,10 @@ go 1.20
 
 require github.com/apache/iotdb-client-go v1.1.7
 
-require (
-	github.com/apache/thrift v0.15.0
-	github.com/dgnabasik/acmsearchlib/filesystem v0.0.0-20221129015018-185444387453
-)
+require github.com/dgnabasik/acmsearchlib/filesystem v0.0.0-20221129015018-185444387453
 
 require (
+	github.com/apache/thrift v0.15.0 // indirect
 	github.com/dgnabasik/acmsearchlib/headers v0.0.0-20220626195032-d1c463c23e95 // indirect
 	github.com/dgnabasik/acmsearchlib/nulltime v0.0.0-20220626195032-d1c463c23e95 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect

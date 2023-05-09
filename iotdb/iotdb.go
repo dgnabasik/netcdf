@@ -1,4 +1,4 @@
-package main //<<iotdb
+package iotdb // main
 
 // Every session.* statement had a checkError() wrapper removed. Do NOT change the source data file.
 // Preconditions: create database root.datasets. You cannot do a Github fork of Go code.
@@ -195,7 +195,7 @@ func (mi MeasurementItem) ToString() string {
 }
 
 type IoTDbDataFile struct {
-	Description        string                     `json:"description"` // <<<
+	Description        string                     `json:"description"`
 	DataFilePath       string                     `json:"datafilepath"`
 	DataFileType       string                     `json:"datafiletype"`
 	SummaryFilePath    string                     `json:"summaryfilepath"`
@@ -207,9 +207,10 @@ type IoTDbDataFile struct {
 }
 
 func Initialize_IoTDbDataFile(programArgs []string) (IoTDbDataFile, error) {
-	datasetPathName := filepath.Base(programArgs[1])
+	datasetPathName := filepath.Base(programArgs[1]) // does not include trailing slash
 	datasetName := datasetPathName[:len(datasetPathName)-len(filepath.Ext(datasetPathName))]
-	iotdbDataFile := IoTDbDataFile{DataFilePath: programArgs[1], DatasetName: datasetName}
+	description, _ := fs.ReadTextLines(filepath.Dir(programArgs[1])+"/description.txt", false)
+	iotdbDataFile := IoTDbDataFile{Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
 	exists, err := fs.FileExists(iotdbDataFile.DataFilePath)
 	if !exists {
 		return iotdbDataFile, err
@@ -241,6 +242,7 @@ func (iot *IoTDbDataFile) OutputDescription(displayColumnInfo bool) string {
 	const crlf = "\n"
 	var sb strings.Builder
 	sb.WriteString(crlf)
+	sb.WriteString("Description     : " + iot.Description + crlf)
 	sb.WriteString("Data Set Name   : " + iot.DatasetName + crlf)
 	sb.WriteString("Data Path       : " + iot.DataFilePath + crlf)
 	sb.WriteString("n Data Types    : " + strconv.Itoa(len(iot.Measurements)) + crlf)
@@ -252,7 +254,6 @@ func (iot *IoTDbDataFile) OutputDescription(displayColumnInfo bool) string {
 			sb.WriteString("  " + item.ToString() + crlf)
 		}
 	}
-
 	return sb.String()
 }
 
@@ -608,37 +609,23 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-func ShowLastExternalBackup() string {
-	fp := "/home/david/lastExternalBackup.txt"
-	exists, _ := fs.FileExists(fp)
-	if !exists {
-		return "The database has never been backed up to an external drive."
-	}
-	lines, _ := fs.ReadTextLines("/home/david/lastExternalBackup.txt", false)
-	msg := strings.Replace(lines[0], "               ", "Last backup at ", 1)
-	return msg
-}
-
 // Directly copy data from one database to another.
 // Source file types determined by file extension: {.nc, .csv, .hd5}
-func main() {
+/*func main() {
 	programArgs := os.Args // [0] is program name
 	ok, iotdbConnection, config := Init_IoTDB()
 	if !ok {
 		log.Fatal(errors.New(iotdbConnection))
 	}
-	fmt.Println(ShowLastExternalBackup())
+	//fmt.Println(ShowLastExternalBackup())
 	if len(programArgs) < 2 {
 		fmt.Println("Required program parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
-		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>.")
-		fmt.Println("All timeseries are placed under the database prefix: " + DatasetPrefix)
+		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
+		fmt.Println("including a description.txt file. All timeseries are placed under the database prefix: " + DatasetPrefix)
 		// xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
 	}
-
 	iotdbDataFile, err := Initialize_IoTDbDataFile(programArgs)
 	checkError(err)
-	fmt.Println(iotdbDataFile.OutputDescription(false)) // display column names
-
 	session = client.NewSession(config)
 	if err := session.Open(false, 0); err != nil {
 		log.Fatal(err)
@@ -654,8 +641,7 @@ func main() {
 
 	case ".hd5":
 	}
-
-}
+} */
 
 // ////////////////////////////////////////////////////////////////////////////
 func testIotdbAccess() {

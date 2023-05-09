@@ -14,11 +14,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"netcdf/iotdb"
+
+	"github.com/apache/iotdb-client-go/client"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
 )
 
@@ -662,7 +666,55 @@ func parseDimensionIndices(nDimensions, lineIndex int, lines []string) ([]string
 
 }
 
+func ShowLastExternalBackup() string {
+	fp := "/home/david/lastExternalBackup.txt"
+	exists, _ := fs.FileExists(fp)
+	if !exists {
+		return "The database has never been backed up to an external drive."
+	}
+	lines, _ := fs.ReadTextLines("/home/david/lastExternalBackup.txt", false)
+	msg := strings.Replace(lines[0], "               ", "Last backup at ", 1)
+	return msg
+}
+
+func checkError(err error) {
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+
 ///////////////////////////////////////////////////////////////////////////////////////////
+
+// Source file types determined by file extension: {.nc, .csv, .hd5}
+func LoadSensorDataIntoDatabase(programArgs []string) { // [0] is program name
+	ok, iotdbConnection, config := iotdb.Init_IoTDB()
+	if !ok {
+		log.Fatal(errors.New(iotdbConnection))
+	}
+	if len(programArgs) < 2 {
+		fmt.Println("Required program parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
+		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
+		fmt.Println("including a description.txt file. All timeseries are placed under the database prefix: " + DatasetPrefix)
+		// xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
+	}
+	iotdbDataFile, err := iotdb.Initialize_IoTDbDataFile(programArgs)
+	checkError(err)
+	session = client.NewSession(config)
+	if err := session.Open(false, 0); err != nil {
+		log.Fatal(err)
+	}
+	defer session.Close()
+
+	switch iotdbDataFile.DataFileType {
+	case ".nc":
+
+	case ".csv": // use xsv tool to output csv file of column types.
+		err = iotdbDataFile.ProcessTimeseries()
+		checkErr("ProcessTimeseries(csv)", err)
+
+	case ".hd5":
+	}
+}
 
 func main() {
 	if len(os.Args) < 3 {
@@ -671,6 +723,7 @@ func main() {
 		fmt.Println("3) Optionally specify the unique dataset identifier; e.g. root.datasets.etsi.Entity_clean_5min")
 		os.Exit(1)
 	}
+	fmt.Println(ShowLastExternalBackup())
 	inputFile := os.Args[1]
 	fileType := os.Args[2]
 	identifier := ""
