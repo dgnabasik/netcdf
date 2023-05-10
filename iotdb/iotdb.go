@@ -185,14 +185,12 @@ type MeasurementItem struct {
 	MeasurementName  string `json:"measurementname"`  // Original name always single-quoted
 	MeasurementAlias string `json:"measurementalias"` // Names that fit IotDB format; see StandardName() => [0-9 a-z A-Z _ ]
 	MeasurementType  string `json:"measurementtype"`  // XSD data type
-	Units            string `json:"units"`
+	MeasurementUnits string `json:"measurementunits"`
 	ColumnOrder      int    `json:"columnorder"` // Column order from data file
 }
 
 func (mi MeasurementItem) ToString() string {
-	const maxWidth = 64
-	//return mi.MeasurementName + strings.Repeat(" ", maxWidth-len(mi.MeasurementName)) + ": " + mi.MeasurementType + ": " + strings.Repeat(" ", maxWidth/2-len(mi.Units))
-	return mi.MeasurementName + " : " + mi.MeasurementType + " : " + mi.Units
+	return mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
 }
 
 type IoTDbDataFile struct {
@@ -318,7 +316,7 @@ func (iot *IoTDbDataFile) XsvSummaryTypeMap() {
 				MeasurementName:  dataColumnName,
 				MeasurementAlias: aliasName,
 				MeasurementType:  rowsXsdMap[iot.Summary[ndx+1][1]],
-				Units:            iot.Summary[ndx+1][unitsColumn],
+				MeasurementUnits: iot.Summary[ndx+1][unitsColumn],
 				ColumnOrder:      ndx,
 			}
 			iot.Measurements[dataColumnName] = mi // add to map
@@ -329,7 +327,7 @@ func (iot *IoTDbDataFile) XsvSummaryTypeMap() {
 		MeasurementName:  LastColumnName,
 		MeasurementAlias: LastColumnName,
 		MeasurementType:  "string",
-		Units:            "unicode,string",
+		MeasurementUnits: "unicode,string",
 		ColumnOrder:      ndx1,
 	}
 	iot.Measurements[LastColumnName] = mi
@@ -394,16 +392,16 @@ func (iot *IoTDbDataFile) SaveInsertStatements() { // []string {
 }
 
 // someTime can be either a long or a readable dateTime string.
-func getStartTime(someTime string) time.Time {
+func getStartTime(someTime string) (time.Time, error) {
 	isLong, err := strconv.ParseInt(someTime, 10, 64)
 	if err == nil {
-		return time.Unix(isLong, 0)
+		return time.Unix(isLong, 0), err
 	}
 	t, err := time.Parse(TimeFormat, someTime)
 	if err != nil {
-		fmt.Println(err)
+		return time.Unix(isLong, 0), err
 	}
-	return t
+	return t, nil
 }
 
 // Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
@@ -509,7 +507,7 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 		index++
 		output[index] = "[ rdf:type owl:Restriction ;"
 		index++
-		output[index] = "owl:onProperty :has" + item.MeasurementName + " ;" // item.MeasurementAlias, item.Units
+		output[index] = "owl:onProperty :has" + item.MeasurementName + " ;" // item.MeasurementAlias, item.MeasurementUnits
 		index++
 		output[index] = "owl:allValuesFrom xsd:" + xsdDatatypeMap[item.MeasurementType]
 		index++
@@ -579,7 +577,10 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 				fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime := getStartTime(iot.Dataset[r][0])
+					startTime, err := getStartTime(iot.Dataset[r][0])
+					if err != nil {
+						break
+					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
 					for c := 0; c < len(iot.Dataset[r])-1; c++ {
 						for _, item := range iot.Measurements {

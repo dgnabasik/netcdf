@@ -25,6 +25,8 @@ github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510120411-31ef86405554 h1:Sc2i38Ya
 github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510120411-31ef86405554/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
 github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510123441-3b0c0174f807 h1:0utC5Swnh7tUKLjtenr1W6gTKTHh4Rj5+i6CuDbJ2R8=
 github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510123441-3b0c0174f807/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
+github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124411-05c07b54d406 h1:kwtvcAeiUu6e+VPo8dwvkbHW/edpmxO2cngbo1OSDfw=
+github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124411-05c07b54d406/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=
 github.com/gin-gonic/gin v1.9.0 h1:OjyFBKICoexlu99ctXNR2gg+c5pKrKMuyjgARg9qeY8=
