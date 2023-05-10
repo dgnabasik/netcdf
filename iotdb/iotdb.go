@@ -526,10 +526,10 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
-		case "drop": // timeseries schema; single statement; clears iot.Measurements.
-			cmd := []string{DatasetPrefix + iot.DatasetName + ".*"}
-			//fmt.Println(strings.ToUpper(command) + " " + cmd) // log this
-			session.DeleteTimeseries(cmd)
+		case "drop": // timeseries schema; uses single statement;
+			sql := "DROP TIMESERIES " + DatasetPrefix + iot.DatasetName + ".*"
+			_, err := iot.session.ExecuteNonQueryStatement(sql)
+			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
 			for k := range iot.Measurements {
 				delete(iot.Measurements, k)
 			}
