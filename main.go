@@ -699,6 +699,7 @@ func LoadCsvSensorDataIntoDatabase(programArgs []string) {
 	}
 	iotdbDataFile, err := iotdb.Initialize_IoTDbDataFile(programArgs)
 	checkErr("Initialize_IoTDbDataFile: ", err)
+	iotdbDataFile.OutputDescription(true)
 	err = iotdbDataFile.ProcessTimeseries()
 	checkErr("ProcessTimeseries(csv)", err)
 }

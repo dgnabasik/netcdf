@@ -190,7 +190,7 @@ type MeasurementItem struct {
 }
 
 func (mi MeasurementItem) ToString() string {
-	const maxWidth = 36
+	const maxWidth = 64
 	return mi.MeasurementName + strings.Repeat(" ", maxWidth-len(mi.MeasurementName)) + ": " + mi.MeasurementType + ": " + strings.Repeat(" ", maxWidth/2-len(mi.Units))
 }
 
