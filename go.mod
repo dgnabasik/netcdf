@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/dgnabasik/acmsearchlib/filesystem v0.0.0-20221129015018-185444387453
 	github.com/dgnabasik/netcdf/graphdb v0.0.0-20230510094358-95997ffa08e3
-	github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510115428-8f0892b41ca4
+	github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510120411-31ef86405554
 )
 
 require (
@@ -36,6 +36,5 @@ require (
 	golang.org/x/sys v0.8.0 // indirect
 	golang.org/x/text v0.9.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

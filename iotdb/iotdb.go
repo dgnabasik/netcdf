@@ -274,15 +274,19 @@ func (iot *IoTDbDataFile) ReadCsvFile(filePath string, isDataset bool) {
 }
 
 // Return quoted name and its alias. Alias: open brackets are replaced with underscore.
-// Need to handle 2 aliases end up being the same.
-func StandardName(oldName string) (string, string) {
+// Need to handle 2 aliases being the same.  Handles some IotDB reserved keywords.
+func StandardName(oldName string) (string, string) { // return MeasurementName, MeasurementAlias
+	newName := oldName
+	if strings.ToLower(newName) == "time" {
+		newName = "time1"
+	}
 	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
-	str := strings.ReplaceAll(oldName, " ", "")
-	str = replacer.Replace(str)
-	if len(oldName) > 2 {
-		return oldName, str
+	alias := strings.ReplaceAll(newName, " ", "")
+	alias = replacer.Replace(alias)
+	if newName != alias {
+		return alias, newName
 	} else {
-		return "", str
+		return newName, alias
 	}
 }
 
@@ -303,7 +307,7 @@ func (iot *IoTDbDataFile) XsvSummaryTypeMap() {
 	ndx1 := 0
 	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
 		if iot.Summary[ndx+1][0] == "interpolated" || len(iot.Summary[ndx+1][0]) < 2 {
-			ndx1 = ndx - 1 //<<<
+			ndx1 = ndx
 			break
 		}
 		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // skip header row
