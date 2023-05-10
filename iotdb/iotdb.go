@@ -191,7 +191,8 @@ type MeasurementItem struct {
 
 func (mi MeasurementItem) ToString() string {
 	const maxWidth = 64
-	return mi.MeasurementName + strings.Repeat(" ", maxWidth-len(mi.MeasurementName)) + ": " + mi.MeasurementType + ": " + strings.Repeat(" ", maxWidth/2-len(mi.Units))
+	//return mi.MeasurementName + strings.Repeat(" ", maxWidth-len(mi.MeasurementName)) + ": " + mi.MeasurementType + ": " + strings.Repeat(" ", maxWidth/2-len(mi.Units))
+	return mi.MeasurementName + " : " + mi.MeasurementType + " : " + mi.Units
 }
 
 type IoTDbDataFile struct {
