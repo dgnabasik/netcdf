@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/dgnabasik/netcdf/graphdb"
 	"github.com/dgnabasik/netcdf/iotdb"
 
 	"github.com/apache/iotdb-client-go/client"

@@ -1,4 +1,4 @@
-module graphdb
+module github.com/dgnabasik/netcdf/graphdb
 
 go 1.20
 
