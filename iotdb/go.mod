@@ -1,4 +1,4 @@
-module iotdb
+module github.com/dgnabasik/netcdf/iotdb
 
 go 1.20
 
