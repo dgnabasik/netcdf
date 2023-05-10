@@ -293,7 +293,7 @@ func StandardName(oldName string) (string, string) { // return MeasurementName, 
 // []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "Units", "DatasetName"}
 // len() only returns the length of the "external" array.
 func (iot *IoTDbDataFile) XsvSummaryTypeMap() {
-	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float"}
+	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer"}
 	iot.Measurements = make(map[string]MeasurementItem, 0)
 	// get units column
 	unitsColumn := 0
