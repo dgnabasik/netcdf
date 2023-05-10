@@ -23,13 +23,13 @@ import (
 	"github.com/dgnabasik/netcdf/graphdb"
 	"github.com/dgnabasik/netcdf/iotdb"
 
-	"github.com/apache/iotdb-client-go/client"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
 )
 
 const ( // these do not include trailing >
 	SarefEtsiOrg  = "<https://saref.etsi.org/"
 	DataSetPrefix = SarefEtsiOrg + "datasets/examples/"
+	IotDataPrefix = "root.datasets.etsi."
 )
 
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
@@ -688,32 +688,27 @@ func checkError(err error) {
 
 // Source file types determined by file extension: {.nc, .csv, .hd5}
 func LoadSensorDataIntoDatabase(programArgs []string) { // [0] is program name
-	ok, iotdbConnection, config := iotdb.Init_IoTDB()
+	ok, iotdbConnection := iotdb.Init_IoTDB()
 	if !ok {
 		log.Fatal(errors.New(iotdbConnection))
 	}
 	if len(programArgs) < 2 {
 		fmt.Println("Required program parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
 		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
-		fmt.Println("including a description.txt file. All timeseries are placed under the database prefix: " + DatasetPrefix)
+		fmt.Println("including a description.txt file. All timeseries data are placed under the database prefix: " + IotDataPrefix)
 		// xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
 	}
 	iotdbDataFile, err := iotdb.Initialize_IoTDbDataFile(programArgs)
 	checkError(err)
-	session = client.NewSession(config)
-	if err := session.Open(false, 0); err != nil {
-		log.Fatal(err)
-	}
-	defer session.Close()
 
 	switch iotdbDataFile.DataFileType {
-	case ".nc":
+	case ".nc": //<<<
 
 	case ".csv": // use xsv tool to output csv file of column types.
 		err = iotdbDataFile.ProcessTimeseries()
 		checkErr("ProcessTimeseries(csv)", err)
 
-	case ".hd5":
+	case ".hd5": //<<<
 	}
 }
 

@@ -32,7 +32,7 @@ const (
 	SarefEtsiOrg   = "<https://saref.etsi.org/" // does not include trailing >
 	OutputLocation = SarefEtsiOrg + "datasets/examples/"
 	DatasetPrefix  = "root.datasets.etsi."
-	timeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ not quite RFC3339 format.
+	TimeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ not quite RFC3339 format. What about timezone?
 	LastColumnName = "DatasetName"
 )
 
@@ -45,6 +45,7 @@ var timeSeriesCommands = []string{"drop", "create", "delete", "insert", "example
 var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
 var iotdbParameters IoTDbProgramParameters
 var session client.Session
+var clientConfig *client.Config
 
 // abort
 func checkErr(title string, err error) {
@@ -164,19 +165,17 @@ func configureIotdbAccess() *client.Config {
 	return config
 }
 
-func (iotpp IoTDbProgramParameters) ToString() string {
-	return iotpp.Host + ":" + iotpp.Port
-}
-
-func Init_IoTDB() (bool, string, *client.Config) {
+func Init_IoTDB() (bool, string) {
 	fmt.Println("Initializing IoTDB client...")
-	config := configureIotdbAccess()
-	isOpen, err := testRemoteAddressPortsOpen(config.Host, []string{config.Port})
+	clientConfig = configureIotdbAccess()
+	isOpen, err := testRemoteAddressPortsOpen(clientConfig.Host, []string{clientConfig.Port})
+	connectStr := clientConfig.Host + ":" + clientConfig.Port
 	if !isOpen {
-		fmt.Printf("%s%v%s", "Expected IoTDB to be available at "+iotdbParameters.ToString()+" but got ERROR: ", err, "\nPlease execute ~/iotdb.sh\n")
-		return false, iotdbParameters.ToString(), config
+		fmt.Printf("%s%v%s", "Expected IoTDB to be available at "+connectStr+" but got ERROR: ", err, "\n")
+		fmt.Printf("Please execute:  cd ~/iotdb && sbin/start-standalone.sh && sbin/start-cli.sh -h 127.0.0.1 -p 6667 -u root -pw root")
+		return false, connectStr
 	}
-	return true, iotdbParameters.ToString(), config
+	return true, connectStr
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -196,6 +195,7 @@ func (mi MeasurementItem) ToString() string {
 }
 
 type IoTDbDataFile struct {
+	session            client.Session             // for (iot *IoTDbDataFile) methods.
 	Description        string                     `json:"description"`
 	DataFilePath       string                     `json:"datafilepath"`
 	DataFileType       string                     `json:"datafiletype"`
@@ -369,7 +369,7 @@ func (iot *IoTDbDataFile) SaveInsertStatements() { // []string {
 	for r := 1; r < len(iot.Dataset); r++ {
 		sb.Reset()
 		sb.WriteString("INSERT INTO " + DatasetPrefix + iot.DatasetName + " (time," + iot.FormattedColumnNames() + ") ALIGNED VALUES (")
-		startTime, err := time.Parse(timeFormat, iot.Dataset[r][0])
+		startTime, err := time.Parse(TimeFormat, iot.Dataset[r][0])
 		if err != nil {
 			fmt.Println(err)
 		}
@@ -394,58 +394,11 @@ func getStartTime(someTime string) time.Time {
 	if err == nil {
 		return time.Unix(isLong, 0)
 	}
-	t, err := time.Parse(timeFormat, someTime)
+	t, err := time.Parse(TimeFormat, someTime)
 	if err != nil {
 		fmt.Println(err)
 	}
 	return t
-}
-
-// IoTDB > insert into root.sg1.d1(time, s1, s2) aligned values(2, 2, 2), (3, 3, 3)
-// Automatically inserts long time column as first column (which should be UTC)
-// Avoid returning huge result. Save in blocks.
-func (iot *IoTDbDataFile) ExecuteInsertStatement() {
-	const blockSize = 163840 // safe
-	nBlocks := len(iot.Dataset)/(blockSize) + 1
-	for block := 0; block < nBlocks; block++ {
-		var sb strings.Builder
-		var insert strings.Builder
-		insert.WriteString("INSERT INTO " + DatasetPrefix + iot.DatasetName + " (time," + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
-		startRow := 1
-		if block > 0 {
-			startRow = blockSize*block + 1
-		}
-		endRow := startRow + blockSize
-		if block == nBlocks-1 {
-			endRow = len(iot.Dataset)
-		}
-		fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
-		for r := startRow; r < endRow; r++ {
-			sb.Reset()
-			startTime := getStartTime(iot.Dataset[r][0])
-			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-			for c := 0; c < len(iot.Dataset[r])-1; c++ {
-				for _, item := range iot.Measurements {
-					if item.ColumnOrder == c {
-						sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
-					}
-				}
-			}
-			sb.WriteString(formatDataItem(iot.DatasetName, "string") + ")")
-			if r < endRow-1 {
-				sb.WriteString(",")
-			}
-			insert.WriteString(sb.String())
-		}
-		//insertStatement := []string{insert.String() + ";"}
-		/*err := fs.WriteTextLines(insertStatement, iot.DataFilePath+".iotdb.insert", false)
-		checkErr("WriteTextLines((insertStatement)", err) */
-		_, err := session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
-		checkErr("session.ExecuteNonQueryStatement(insertStatement)", err)
-		time.Sleep(1 * time.Second)
-		// For large # of inserts: session.ExecuteBatchStatement(insertStatement): write tcp 127.0.0.1:43400->127.0.0.1:6667: write: connection reset by peer
-	}
-	fmt.Println()
 }
 
 // Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
@@ -562,7 +515,14 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
 // create timeseries root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
+// ProcessTimeseries() is the only place where iot.session is instantiated and clientConfig is used.
 func (iot *IoTDbDataFile) ProcessTimeseries() error {
+	iot.session = client.NewSession(clientConfig)
+	if err := iot.session.Open(false, 0); err != nil {
+		log.Fatal(err)
+	}
+	defer iot.session.Close()
+
 	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
@@ -581,20 +541,60 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 				sb.WriteString(item.MeasurementName + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			_, err := session.ExecuteNonQueryStatement(sql)
-			checkErr("session.ExecuteNonQueryStatement(createStatement)", err)
+			_, err := iot.session.ExecuteNonQueryStatement(sql)
+			checkErr("ExecuteNonQueryStatement(createStatement)", err)
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			deleteStatements := make([]string, 0)
 			for _, item := range iot.Measurements {
 				deleteStatements = append(deleteStatements, "DELETE FROM "+DatasetPrefix+iot.DatasetName+"."+item.MeasurementName+";")
 			}
-			_, err := session.ExecuteBatchStatement(deleteStatements) // (r *common.TSStatus, err error)
-			checkErr("session.ExecuteBatchStatement(deleteStatements)", err)
+			_, err := iot.session.ExecuteBatchStatement(deleteStatements) // (r *common.TSStatus, err error)
+			checkErr("ExecuteBatchStatement(deleteStatements)", err)
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
-			//iot.SaveInsertStatements()   // write multiple statements to disk for review, but execute single statement since somewhat faster:
-			iot.ExecuteInsertStatement() // do not log this 6.1Gb statement.
+			// iot.SaveInsertStatements()   // can write multiple statements to disk for review, but execute single statement since somewhat faster:
+			// Automatically inserts long time column as first column (which should be UTC). Avoid returning huge result. Save in blocks.
+			const blockSize = 163840 // safe
+			nBlocks := len(iot.Dataset)/(blockSize) + 1
+			for block := 0; block < nBlocks; block++ {
+				var sb strings.Builder
+				var insert strings.Builder
+				insert.WriteString("INSERT INTO " + DatasetPrefix + iot.DatasetName + " (time," + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
+				startRow := 1
+				if block > 0 {
+					startRow = blockSize*block + 1
+				}
+				endRow := startRow + blockSize
+				if block == nBlocks-1 {
+					endRow = len(iot.Dataset)
+				}
+				fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
+				for r := startRow; r < endRow; r++ {
+					sb.Reset()
+					startTime := getStartTime(iot.Dataset[r][0])
+					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
+					for c := 0; c < len(iot.Dataset[r])-1; c++ {
+						for _, item := range iot.Measurements {
+							if item.ColumnOrder == c {
+								sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
+							}
+						}
+					}
+					sb.WriteString(formatDataItem(iot.DatasetName, "string") + ")")
+					if r < endRow-1 {
+						sb.WriteString(",")
+					}
+					insert.WriteString(sb.String())
+				}
+				//insertStatement := []string{insert.String() + ";"}
+				/*err := fs.WriteTextLines(insertStatement, iot.DataFilePath+".iotdb.insert", false)
+				checkErr("WriteTextLines((insertStatement)", err) */
+				_, err := iot.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
+				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
+				//time.Sleep(1 * time.Second)
+			}
+			fmt.Println()
 
 		case "example": // output saref ttl class file:
 			/*<<< ttlLines := iot.Format_TurtleOntology()
