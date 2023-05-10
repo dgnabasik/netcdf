@@ -414,7 +414,7 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 	case "string":
 		return "TEXT", "PLAIN", "SNAPPY"
 	case "integer":
-		return "INT32", "GORILLA", "SNAPPY"
+		return "INT64", "GORILLA", "SNAPPY"
 	case "long":
 		return "INT64", "GORILLA", "SNAPPY"
 	case "float":
@@ -579,6 +579,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 					sb.Reset()
 					startTime, err := getStartTime(iot.Dataset[r][0])
 					if err != nil {
+						fmt.Println(iot.Dataset[r][0]) //<<<
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
