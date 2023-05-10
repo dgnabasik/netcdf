@@ -16,6 +16,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -678,53 +679,36 @@ func ShowLastExternalBackup() string {
 	return msg
 }
 
-func checkError(err error) {
+// abort
+/*func checkErr(title string, err error) {
 	if err != nil {
-		log.Fatal(err)
+		fmt.Print(title + ": ")
+		fmt.Println(err)
+		os.Exit(1)
 	}
-}
+}*/
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// Source file types determined by file extension: {.nc, .csv, .hd5}
-func LoadSensorDataIntoDatabase(programArgs []string) { // [0] is program name
+// use xsv tool to output csv file of column types:
+// xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
+func LoadCsvSensorDataIntoDatabase(programArgs []string) {
 	ok, iotdbConnection := iotdb.Init_IoTDB()
 	if !ok {
 		log.Fatal(errors.New(iotdbConnection))
 	}
-	if len(programArgs) < 2 {
-		fmt.Println("Required program parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
-		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
-		fmt.Println("including a description.txt file. All timeseries data are placed under the database prefix: " + IotDataPrefix)
-		// xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
-	}
 	iotdbDataFile, err := iotdb.Initialize_IoTDbDataFile(programArgs)
-	checkError(err)
-
-	switch iotdbDataFile.DataFileType {
-	case ".nc": //<<<
-
-	case ".csv": // use xsv tool to output csv file of column types.
-		err = iotdbDataFile.ProcessTimeseries()
-		checkErr("ProcessTimeseries(csv)", err)
-
-	case ".hd5": //<<<
-	}
+	checkErr("Initialize_IoTDbDataFile: ", err)
+	err = iotdbDataFile.ProcessTimeseries()
+	checkErr("ProcessTimeseries(csv)", err)
 }
 
-func main() {
-	if len(os.Args) < 3 {
-
-		fmt.Println("Specify 1) path to single *.var file, and 2) CDF file type {HDF5, netCDF-4, classic}.")
-		fmt.Println("3) Optionally specify the unique dataset identifier; e.g. root.datasets.etsi.Entity_clean_5min")
-		os.Exit(1)
-	}
-	fmt.Println(ShowLastExternalBackup())
-	inputFile := os.Args[1]
-	fileType := os.Args[2]
+func LoadNcSensorDataIntoDatabase(programArgs []string) {
+	inputFile := programArgs[1]
+	fileType := programArgs[2]
 	identifier := ""
-	if len(os.Args) > 3 {
-		identifier = os.Args[3]
+	if len(programArgs) > 3 {
+		identifier = programArgs[3]
 	}
 
 	netcdf, err := ParseVariableFile(inputFile+".var", fileType, identifier)
@@ -749,4 +733,35 @@ func main() {
 	checkErr("fs.WriteTextLines(ttl)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".sparql", sparqlQuery)
 	checkErr("UploadFile: "+inputFile+".sparql", err)
+}
+
+func LoadHd5SensorDataIntoDatabase(programArgs []string) {
+	// <<<
+}
+
+// Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
+func main() {
+	fmt.Println(ShowLastExternalBackup())
+	sourceDataType := "help"
+	if len(os.Args) > 1 {
+		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
+	}
+
+	switch sourceDataType {
+	case ".csv":
+		LoadCsvSensorDataIntoDatabase(os.Args)
+	case ".var":
+		LoadNcSensorDataIntoDatabase(os.Args)
+	case ".hd5":
+		LoadHd5SensorDataIntoDatabase(os.Args)
+	default:
+		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
+		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
+		fmt.Println("including a description.txt file. All timeseries data are placed under the database prefix: " + IotDataPrefix)
+		fmt.Println("Required *.var parameters: 1) path to single *.var file, and 2) CDF file type {HDF5, netCDF-4, classic}.")
+		fmt.Println("  3) Optionally specify the unique dataset identifier; e.g. Entity_clean_5min")
+		fmt.Println("Required *.hd5 parameters: 1) path to single *.var file, and 2) CDF file type {HDF5, netCDF-4, classic}.")
+		fmt.Println("  3) Optionally specify the unique dataset identifier; e.g. Entity_clean_5min")
+		os.Exit(0)
+	}
 }

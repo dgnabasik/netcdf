@@ -5,6 +5,7 @@ package graphdb
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"net/url"
 	"os"
@@ -328,7 +329,7 @@ func checkErr(title string, err error) {
 	if err != nil {
 		fmt.Print(title + ": ")
 		fmt.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 }
 

@@ -1,4 +1,4 @@
-package iotdb // main
+package iotdb
 
 // Every session.* statement had a checkError() wrapper removed. Do NOT change the source data file.
 // Preconditions: create database root.datasets. You cannot do a Github fork of Go code.
@@ -52,7 +52,7 @@ func checkErr(title string, err error) {
 	if err != nil {
 		fmt.Print(title + ": ")
 		fmt.Println(err)
-		os.Exit(1)
+		log.Fatal(err)
 	}
 }
 
@@ -526,11 +526,12 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
-		case "drop": // timeseries schema; uses multiple statements;
-			for _, item := range iot.Measurements {
-				cmd := DatasetPrefix + iot.DatasetName + "." + item.MeasurementName
-				//fmt.Println(strings.ToUpper(command) + " " + cmd) // log this
-				deleteTimeseries(cmd)
+		case "drop": // timeseries schema; single statement; clears iot.Measurements.
+			cmd := []string{DatasetPrefix + iot.DatasetName + ".*"}
+			//fmt.Println(strings.ToUpper(command) + " " + cmd) // log this
+			session.DeleteTimeseries(cmd)
+			for k := range iot.Measurements {
+				delete(iot.Measurements, k)
 			}
 
 		case "create": // create aligned timeseries schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
@@ -592,7 +593,6 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 				checkErr("WriteTextLines((insertStatement)", err) */
 				_, err := iot.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-				//time.Sleep(1 * time.Second)
 			}
 			fmt.Println()
 
