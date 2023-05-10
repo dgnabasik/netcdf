@@ -303,7 +303,7 @@ func (iot *IoTDbDataFile) XsvSummaryTypeMap() {
 	ndx1 := 0
 	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
 		if iot.Summary[ndx+1][0] == "interpolated" || len(iot.Summary[ndx+1][0]) < 2 {
-			ndx1 = ndx
+			ndx1 = ndx - 1 //<<<
 			break
 		}
 		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // skip header row
@@ -528,6 +528,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 		switch command {
 		case "drop": // timeseries schema; uses single statement;
 			sql := "DROP TIMESERIES " + DatasetPrefix + iot.DatasetName + ".*"
+			fmt.Println(sql)
 			_, err := iot.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
 			for k := range iot.Measurements {
