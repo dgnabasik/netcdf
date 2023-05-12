@@ -38,8 +38,18 @@ const (
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339","kWh,kilowatt-hour","unicode,string","unixutc,long","kW,kilowatt","°F,Farenheit","°C,Celsius","%rh,percent relative humidity" }
-// var recommendedUnits = []string{"km,kilometers","mb,millibars", "degrees,360",""
+//var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339", "unicode,string", "unixutc,long" }
+
+// Manually add the map keys to the (last) units column header.
+var unitsOfMeasure = map[string]string{
+	"kW":           "http://www.ontology-of-units-of-measure.org/resource/om-2/kilowatt",
+	"kWh":          "http://www.ontology-of-units-of-measure.org/resource/om-2/kilowattHour",
+	"°C,Celsius":   "http://www.ontology-of-units-of-measure.org/resource/om-2/degreeCelsius",
+	"°F,Farenheit": "http://www.ontology-of-units-of-measure.org/resource/om-2/degreeFahrenheit",
+	"%rh":          "http://www.ontology-of-units-of-measure.org/resource/om-2/RelativeHumidity",
+	"mb":           "http://www.ontology-of-units-of-measure.org/resource/om-2/millibar",
+	"degrees":      "http://www.ontology-of-units-of-measure.org/resource/om-2/degree",
+	"km":           "http://www.ontology-of-units-of-measure.org/resource/om-2/kilometre"}
 
 var timeSeriesCommands = []string{"drop", "create", "delete", "insert", "example"}
 var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
@@ -427,12 +437,11 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 	return "TEXT", "PLAIN", "SNAPPY"
 }
 
-// Produce DatatypeProperty ontology from dataset.
-// Make the dataset its own Class and loadable into GraphDB as Named Graph.
-// Special handling: "dateTime", "XMLLiteral", "anyURI"
+// Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
+// Make the dataset its own Class and loadable into GraphDB as Named Graph. Special handling: "dateTime", "XMLLiteral", "anyURI"
 func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 	var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
-	output := make([]string, 256)
+	output := make([]string, 256)                                                                                                                                                  // best guess
 	output[0] = "@prefix s4data: " + OutputLocation + "> ."
 	output[1] = "@prefix example: " + OutputLocation + iot.DatasetName + "/> ."
 
@@ -579,7 +588,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 					sb.Reset()
 					startTime, err := getStartTime(iot.Dataset[r][0])
 					if err != nil {
-						fmt.Println(iot.Dataset[r][0]) //<<<
+						fmt.Println(iot.Dataset[r][0]) //<<< Integer type not picked up.
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
@@ -605,9 +614,9 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			fmt.Println()
 
 		case "example": // output saref ttl class file:
-			/*<<< ttlLines := iot.Format_TurtleOntology()
+			ttlLines := iot.Format_TurtleOntology()
 			err := fs.WriteTextLines(ttlLines, iot.DataFilePath+".ttl", false)
-			checkErr("WriteTextLines(ttl.output", err)*/
+			checkErr("WriteTextLines(ttl.output", err)
 
 		} // switch
 		fmt.Println("Timeseries " + command + " completed.")

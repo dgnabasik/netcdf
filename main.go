@@ -17,7 +17,6 @@ import (
 	"log"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -34,57 +33,6 @@ const ( // these do not include trailing >
 )
 
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-// This struct is returned from FindClosestSarefEntity().
-type EntityVariableAlias struct {
-	EntityName     string             `json:"Entityname"`
-	NameTokens     []string           `json:"nametokens"`
-	SarefEntityIRI map[string]float64 `json:"sarefentityiri"`
-}
-
-func (eva EntityVariableAlias) ParentClassIRI() string {
-	for key := range eva.SarefEntityIRI {
-		return key
-	}
-	return ""
-}
-
-func (eva EntityVariableAlias) ToString() string {
-	const sep = "\n"
-	str := "Name  : " + eva.EntityName + sep + "Tokens: " + strings.Join(eva.NameTokens, "  ") + sep + "IRI   : "
-	for k, v := range eva.SarefEntityIRI {
-		str += k + " : " + strconv.FormatFloat(v, 'f', 4, 64) + sep
-	}
-	return str
-}
-
-// Parse words from variable names: camelCase, underscores, ignore digits. Entity index names use lowercase. Assigns eva.NameTokens.
-func (eva *EntityVariableAlias) ParseEntityVariable() {
-	re := regexp.MustCompile(`[A-Z][^A-Z]*`)
-	tokens := strings.Split(eva.EntityName, "_")
-	camels := make([]string, 0)
-	for ndx := range tokens {
-		for inner := 0; inner <= 9; inner++ {
-			sn := strconv.Itoa(inner)
-			if strings.HasSuffix(tokens[ndx], sn) {
-				tokens[ndx] = strings.Replace(tokens[ndx], sn, "", 1)
-			}
-		}
-		matchCase := re.FindAllString(tokens[ndx], -1) // Split by uppercase; disallow single-letter names.
-		for outer := 0; outer < len(matchCase); outer++ {
-			if len(matchCase[outer]) > 1 {
-				camels = append(camels, matchCase[outer])
-			}
-		}
-	}
-	// remove duplicates but retain camelCase vars.
-	tokens = append(tokens, camels...)
-	tokens = removeDuplicateStr(tokens)
-	eva.NameTokens = make([]string, len(tokens))
-	copy(eva.NameTokens, tokens) // dst, src
-}
 
 // Contains an entire month's worth of Entity data for every Variable where each row is indexed by {HouseIndex+LongtimeIndex}.
 type EntityCleanData struct {
@@ -317,7 +265,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
 	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
 
-	eva, _ := FindClosestSarefEntity(cdf.Identifier) // error
+	eva, _ := graphdb.FindClosestSarefEntity(cdf.Identifier) // EntityVariableAlias
 
 	output[16] = DataSetPrefix + cdf.Identifier + "#> a dctype:Dataset ;"
 	output[17] = `dcterms:title "` + cdf.Title + `"@en ;`
@@ -383,50 +331,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 	return output
 }
 
-// Access merged repository in local GraphDB; use merged_sim_ndx predicate-similarity index.
-// Because the repository is simply an aggregate of the 13 SAREF ontologies, have to run the curl query 13 times.
-// An exact match will return a score of about 1.0. This is the only function that calls the graphdb package.
-// # $1=https://saref.etsi.org/core/AbsolutePosition
-// curl -G -H "Accept:application/sparql-results+json" -d query=PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0ASELECT%20%3Fentity%20%3Fscore%20%7B%0A%3Fsearch%20a%20inst%3Amerged_sim_ndx%20%3B%0Apsi%3AsearchEntity%20%3C" + $1 + "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%209%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A http://localhost:7200/repositories/merged
-func FindClosestSarefEntity(varName string) (EntityVariableAlias, error) {
-	eva := EntityVariableAlias{EntityName: varName}
-	isOpen, graphdbURL := graphdb.Init_GraphDB()
-	if !isOpen {
-		return eva, errors.New("Unable to access GraphDB at " + graphdbURL)
-	}
-	var sarefExtensions = make([]string, 0)
-	for _, value := range graphdb.SarefMap {
-		sarefExtensions = append(sarefExtensions, value)
-	}
-	eva.ParseEntityVariable() // Assigns eva.NameTokens.
-	similarOutputs := make([]graphdb.Similarity, 0)
-	for _, token := range eva.NameTokens {
-		for _, saref := range sarefExtensions {
-			entityIRI := saref + token
-			similars := graphdb.ExtractSimilarEntities(entityIRI) // []graphdb.Similarity
-			similarOutputs = append(similarOutputs, similars...)
-		}
-	}
-	if len(similarOutputs) > 0 {
-		eva.SarefEntityIRI = map[string]float64{similarOutputs[0].Uri: similarOutputs[0].Score}
-	}
-	return eva, nil
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////
-
-// Not generic.
-func removeDuplicateStr(strSlice []string) []string {
-	allKeys := make(map[string]bool)
-	list := []string{}
-	for _, item := range strSlice {
-		if _, value := allKeys[item]; !value {
-			allKeys[item] = true
-			list = append(list, item)
-		}
-	}
-	return list
-}
 
 // Critical error aborts program.
 func checkErr(title string, err error) {
