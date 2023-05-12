@@ -377,7 +377,7 @@ func removeDuplicateStr(strSlice []string) []string {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// This struct is returned from FindClosestSarefEntity().
+// This struct is returned from GetClosestSarefEntity().
 type EntityVariableAlias struct {
 	EntityName     string             `json:"Entityname"`
 	NameTokens     []string           `json:"nametokens"`
@@ -428,10 +428,8 @@ func (eva *EntityVariableAlias) ParseEntityVariable() {
 
 // Access merged repository in local GraphDB; use merged_sim_ndx predicate-similarity index.
 // Because the repository is simply an aggregate of the 13 SAREF ontologies, have to run the curl query 13 times.
-// An exact match will return a score of about 1.0. This is the only function that calls the graphdb package.
-// # $1=https://saref.etsi.org/core/AbsolutePosition
 // curl -G -H "Accept:application/sparql-results+json" -d query=PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0ASELECT%20%3Fentity%20%3Fscore%20%7B%0A%3Fsearch%20a%20inst%3Amerged_sim_ndx%20%3B%0Apsi%3AsearchEntity%20%3C" + $1 + "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%209%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A http://localhost:7200/repositories/merged
-func FindClosestSarefEntity(varName string) (EntityVariableAlias, error) {
+func GetClosestEntity(varName string) (EntityVariableAlias, error) {
 	eva := EntityVariableAlias{EntityName: varName}
 	isOpen, graphdbURL := Init_GraphDB()
 	if !isOpen {

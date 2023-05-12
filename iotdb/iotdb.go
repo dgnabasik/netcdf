@@ -460,7 +460,7 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
 	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
 
-	//eva, _ := FindClosestSarefEntity("variableName") // (EntityVariableAlias, error)
+	//<<<<eva, _ := GetClosestEntity("variableName") // (EntityVariableAlias, error)
 
 	output[16] = OutputLocation + iot.DatasetName + "#> a dctype:Dataset ;"
 	output[17] = `dcterms:title "` + iot.Description + `"@en ;`
@@ -473,7 +473,7 @@ func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
 	output[22] = "s4data:" + iot.DatasetName + " rdf:type owl:Class ;"
 	output[23] = `rdfs:comment "` + iot.Description + `"@en ;`
 	output[24] = `rdfs:label "` + iot.DatasetName + `"@en .`
-	//output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
+	//<<<<output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
 	// Add standard Measurement properties
 	output[26] = "[ rdf:type owl:Restriction ;"
 	output[27] = "owl:onProperty saref:measurementMadeBy ;"
@@ -534,8 +534,8 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 		log.Fatal(err)
 	}
 	defer iot.session.Close()
-
 	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
+
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
 		case "drop": // timeseries schema; uses single statement;

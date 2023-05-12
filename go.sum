@@ -21,12 +21,6 @@ github.com/dgnabasik/acmsearchlib/nulltime v0.0.0-20221129015018-185444387453 h1
 github.com/dgnabasik/acmsearchlib/nulltime v0.0.0-20221129015018-185444387453/go.mod h1:bWp8J4DLx6w1kcmuhfalRjpmTsG/I9CSxmwU2PxNyBs=
 github.com/dgnabasik/netcdf/graphdb v0.0.0-20230510094358-95997ffa08e3 h1:fRV0tHnWTCx27MRi8EFnYG0tFhrqAWnqduH2mfCh64w=
 github.com/dgnabasik/netcdf/graphdb v0.0.0-20230510094358-95997ffa08e3/go.mod h1:EVfS3XG5HRGiHJFXHuXz/757WTHe+JNIUXBrKSSSsGI=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510120411-31ef86405554 h1:Sc2i38YagJi5nVXULBhIcWurVW0xqC03AVwmKppMquM=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510120411-31ef86405554/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510123441-3b0c0174f807 h1:0utC5Swnh7tUKLjtenr1W6gTKTHh4Rj5+i6CuDbJ2R8=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510123441-3b0c0174f807/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124411-05c07b54d406 h1:kwtvcAeiUu6e+VPo8dwvkbHW/edpmxO2cngbo1OSDfw=
-github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124411-05c07b54d406/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
 github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124700-e5aeb4b8245b h1:yXAESNYytjuKmnE11VrpuxAZKu3Rk8TA8sV1lSztmbE=
 github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124700-e5aeb4b8245b/go.mod h1:yFpNDvd7y1NQKbWKGSVR7Kl6iC6ICXM1TsPmk0Aaf/U=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=

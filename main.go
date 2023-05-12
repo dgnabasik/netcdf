@@ -20,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/dgnabasik/netcdf/graphdb"
 	"github.com/dgnabasik/netcdf/iotdb"
 
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
@@ -265,7 +264,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
 	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
 
-	eva, _ := graphdb.FindClosestSarefEntity(cdf.Identifier) // EntityVariableAlias
+	//<<<<graphdb.GetClosestEntity(cdf.Identifier) // EntityVariableAlias
 
 	output[16] = DataSetPrefix + cdf.Identifier + "#> a dctype:Dataset ;"
 	output[17] = `dcterms:title "` + cdf.Title + `"@en ;`
@@ -278,7 +277,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 	output[22] = "s4data:" + cdf.Identifier + " rdf:type owl:Class ;"
 	output[23] = `rdfs:comment "` + cdf.Description + `"@en ;`
 	output[24] = `rdfs:label "` + cdf.Identifier + `"@en .`
-	output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
+	//<<<<output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
 	// Add standard Measurement properties
 	output[26] = "[ rdf:type owl:Restriction ;"
 	output[27] = "owl:onProperty saref:measurementMadeBy ;"
@@ -595,7 +594,7 @@ func ShowLastExternalBackup() string {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// use xsv tool to output csv file of column types:
+// This is the only function that calls iotdb. use xsv tool to output csv file of column types:
 // xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
 func LoadCsvSensorDataIntoDatabase(programArgs []string) {
 	ok, iotdbConnection := iotdb.Init_IoTDB()
