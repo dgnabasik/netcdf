@@ -1,0 +1,6 @@
+{ 
+  "ttlFileDirectory": "/home/david/Documents/ontologies.ttl/",
+  "similarityCutoff": 0.92,
+  "defaultDbInstanceUrl": "http://localhost:7200/repositories/merged",
+  "defaultUserMode": "auto"
+}

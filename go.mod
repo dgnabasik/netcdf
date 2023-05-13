@@ -3,13 +3,11 @@ module netcdf
 go 1.20
 
 require (
+	github.com/apache/iotdb-client-go v1.1.7
 	github.com/dgnabasik/acmsearchlib/filesystem v0.0.0-20221129015018-185444387453
-	github.com/dgnabasik/netcdf/graphdb v0.0.0-20230510094358-95997ffa08e3
-	github.com/dgnabasik/netcdf/iotdb v0.0.0-20230510124700-e5aeb4b8245b
 )
 
 require (
-	github.com/apache/iotdb-client-go v1.1.7 // indirect
 	github.com/apache/thrift v0.18.1 // indirect
 	github.com/bytedance/sonic v1.8.8 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect

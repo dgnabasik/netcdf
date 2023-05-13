@@ -141,6 +141,17 @@ type GraphDbProgramParameters struct {
 	DefaultUserMode      string  `json:"defaultUserMode"`
 }
 
+func (progParams GraphDbProgramParameters) DisplayProgramStats(stats []string) {
+	fmt.Println()
+	fmt.Println("Program Parameters::")
+	fmt.Println(progParams)
+	fmt.Println()
+	for i := 0; i < len(stats); i++ {
+		fmt.Println(stats[i])
+	}
+	fmt.Println()
+}
+
 const (
 	ttlFileDirectory     = "/home/davidgnabasik/Documents/ontologies.ttl/"
 	defaultUserMode      = "auto"
@@ -159,7 +170,7 @@ func assignProgramParametersDefaults(err error) {
 		SimilarityCutoff:     similarityCutoff,
 		DefaultDbInstanceUrl: defaultDbInstanceUrl,
 	}
-	DisplayProgramStats(graphDBparameters, []string{})
+	graphDBparameters.DisplayProgramStats([]string{})
 }
 
 // Return default GraphDbProgramParameters values if file not found. Expects graphdb package folder is directly beneath main go file.
@@ -698,17 +709,6 @@ func GetClassByState() []ClassSuperClass {
 		}
 	}
 	return classSuperClass
-}
-
-func DisplayProgramStats(programParameters GraphDbProgramParameters, stats []string) {
-	fmt.Println()
-	fmt.Println("Program Parameters::")
-	fmt.Println(programParameters)
-	fmt.Println()
-	for i := 0; i < len(stats); i++ {
-		fmt.Println(stats[i])
-	}
-	fmt.Println()
 }
 
 func removeIndex(s []Similarity, index int) []Similarity {
