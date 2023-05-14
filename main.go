@@ -420,11 +420,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 	for _, v := range cdf.Variables {
 		eva, _ := GetClosestEntity(cdf.Identifier) // graphdb.EntityVariableAlias
 		fmt.Println(eva.ParentClassIRI())
-		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf)
-		output = append(output, `[ rdf:type owl:Restriction ;`+crlf)
-		output = append(output, `owl:onProperty :has`+v.StandardName+` ;`+crlf)
-		output = append(output, `owl:allValuesFrom xsd:`+xsdDatatypeMap[v.ReturnType]+crlf)
-		output = append(output, `] ; .`+crlf+crlf)
+		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf+`[ rdf:type owl:Restriction ;`+crlf+`owl:onProperty :has`+v.StandardName+` ;`+crlf+`owl:allValuesFrom xsd:`+xsdDatatypeMap[v.ReturnType]+crlf+`] ; .`+crlf+crlf)
 	}
 
 	return output
