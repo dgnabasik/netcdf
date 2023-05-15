@@ -1,14 +1,24 @@
 package main
 
-// Produce json file, DatatypeProperty ontology file, and SPARQL query files file from ncdump outputs.
-// Use Named Graphs (Identifier+Title+DatastreamName) as Publish/Subscribe topics.
-// /usr/bin/ncdump -k cdf.nc			==> get file type {classic, netCDF-4, others...}
-// /usr/bin/ncdump -c Jan_clean.nc		==> gives header + indexed {id, time} data
-// https://docs.unidata.ucar.edu/nug/current/index.html		Golang supports compressed file formats {rardecode(rar), gz/gzip, zlib, lzw, bzip2}
-// Curated data: Each data row is indexed by {a house ID, a time value}. How to import the data into GraphDB (as a Named Graph)?
-// nc files: ./github.com/go-native-netcdf/netcdf/*.nc	./github.com/netcdf-c/*.nc	./Documents/digital-twins/Entity/*.nc
-// h5 files: ./Documents/digital-twins/AMP/AMPds2.h5	./github.com/netcdf-c/nc_test4/*.h5	./github.com/nci-doe-data-sharing/flaskProject/mt-cnn/mt_cnn_model.h5 ./github.com/go-native-netcdf/netcdf/hdf5/testdata
-// csv files: many.
+// Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
+// Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
+// The properties of the constituents of a system determine how the system works.
+
+/* Datatype properties (attributes) relate individuals to literal data whereas object properties relate individuals to other individuals.
+   Time series as a sequence of measurements, where each measurement is defined as an object with a value, a named event, and a metric. A time series object binds a metric to a resource.
+   Use queries to get statistical Maximum, Minimum, Mean, StandardDeviation, Median, Mode.
+   Equivalent timeseries => owl:sameAs: hasUnit, hasEquation, hasDistribution.
+   Produce json file, DatatypeProperty ontology file, and SPARQL query files file from ncdump outputs.
+   Use Named Graphs (Identifier+Title+DatastreamName) as Publish/Subscribe topics.
+   /usr/bin/ncdump -k cdf.nc			==> get file type {classic, netCDF-4, others...}
+   /usr/bin/ncdump -c Jan_clean.nc		==> gives header + indexed {id, time} data
+   https://docs.unidata.ucar.edu/nug/current/index.html		Golang supports compressed file formats {rardecode(rar), gz/gzip, zlib, lzw, bzip2}
+   Curated data: Each data row is indexed by {a house ID, a time value}. How to import the data into GraphDB (as a Named Graph)?
+   nc files: ./github.com/go-native-netcdf/netcdf/*.nc	./github.com/netcdf-c/*.nc	./Documents/digital-twins/Entity/*.nc
+   h5 files: ./Documents/digital-twins/AMP/AMPds2.h5	./github.com/netcdf-c/nc_test4/*.h5	./github.com/nci-doe-data-sharing/flaskProject/mt-cnn/mt_cnn_model.h5 ./github.com/go-native-netcdf/netcdf/hdf5/testdata
+   csv files: many.
+*/
+
 import (
 	//"bytes"
 	//"context"
@@ -46,7 +56,22 @@ const ( // these do not include trailing >
 	IotDataPrefix = "root.datasets.etsi."
 )
 
+var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
+var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
+var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
+
+/*
+Discrete uniform distribution: All outcomes are equally likely.
+Bernoulli Distribution: Single-trial with two possible outcomes.
+Binomial Distribution: A sequence of Bernoulli events.
+Poisson Distribution: The probability that an event may or may not occur.
+Normal Distribution: Symmetric distribution of values around the mean.
+Student t-Test Distribution: Small sample size approximation of a normal distribution.
+Exponential distribution: Model elapsed time between two events.
+Gamma distribution: Describes the time to wait for a fixed number of events.
+Weibull Distribution: Describes a waiting time for one event, if that event becomes more or less likely with time.
+*/
 
 // Contains an entire month's worth of Entity data for every Variable where each row is indexed by {HouseIndex+LongtimeIndex}.
 type EntityCleanData struct {
@@ -56,47 +81,57 @@ type EntityCleanData struct {
 }
 
 // EntityCleanData initializer.
-func MakeEntityCleanData(rows int, vars []CDFvariable) EntityCleanData {
+func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 	ecd := EntityCleanData{}
 	cols := len(vars)
-	ecd.Data = make([][]string, rows) // initialize a slice of rows slices
+	ecd.Data = make([][]string, rows) // make a slice of rows slices
 	for i := 0; i < rows; i++ {
-		ecd.Data[i] = make([]string, cols) // initialize a slice of cols in each of rows slices
+		ecd.Data[i] = make([]string, cols) // make a slice of cols in each of rows slices
 	}
 	return ecd
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
+// mapped to original column name
+type MeasurementItem struct {
+	MeasurementName  string `json:"measurementname"`  // Original name always single-quoted
+	MeasurementAlias string `json:"measurementalias"` // Names that fit IotDB format; see MeasurementName() => [0-9 a-z A-Z _ ]
+	MeasurementType  string `json:"measurementtype"`  // XSD data type
+	MeasurementUnits string `json:"measurementunits"`
+	ColumnOrder      int    `json:"columnorder"` // Column order from data file
+}
+
+func (mi MeasurementItem) ToString() string {
+	return mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
+}
+
 // Expects the parameters to every Variable to be all the (2) dimensions (except for the dimension variables).
-type CDFvariable struct {
-	StandardName   string `json:"standardname"`
-	LongName       string `json:"longname"`
-	Units          string `json:"units"`
-	ReturnType     string `json:"returntype"`
-	DimensionIndex int    `json:"dimensionindex"` // {0,1,2} Default 0 signifies the Variable is not a Dimension.
-	FillValue      string `json:"fillvalue"`
-	Comment        string `json:"comment"`
-	Calendar       string `json:"calendar"`
+type MeasurementVariable struct {
+	MeasurementItem `json:"measurementitem"`
+	DimensionIndex  int    `json:"dimensionindex"` // {0,1,2} Default 0 signifies the Variable is not a Dimension.
+	FillValue       string `json:"fillvalue"`
+	Comment         string `json:"comment"`
+	Calendar        string `json:"calendar"`
 }
 
 // Generic NetCDF container. Not stored in IotDB.
 type NetCDF struct {
-	Identifier       string         `json:"identifier"` // Unique ID to distinguish among different datasets; use as Named Graph.
-	NetcdfType       string         `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
-	Dimensions       map[string]int `json:"dimensions"`
-	Title            string         `json:"title"`
-	Description      string         `json:"description"`
-	Conventions      string         `json:"conventions"`
-	Institution      string         `json:"institution"`
-	Code_url         string         `json:"code_url"`
-	Location_meaning string         `json:"location_meaning"`
-	Datastream_name  string         `json:"datastream_name"`
-	Input_files      string         `json:"input_files"`
-	History          string         `json:"history"`
-	Variables        []CDFvariable  `json:"variables"`
-	HouseIndices     []string       `json:"houseindices"`    // these unique 2 indices are specific to Entity datasets.
-	LongtimeIndices  []string       `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
+	Identifier       string                `json:"identifier"` // Unique ID to distinguish among different datasets; use as Named Graph.
+	NetcdfType       string                `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
+	Dimensions       map[string]int        `json:"dimensions"`
+	Title            string                `json:"title"`
+	Description      string                `json:"description"`
+	Conventions      string                `json:"conventions"`
+	Institution      string                `json:"institution"`
+	Code_url         string                `json:"code_url"`
+	Location_meaning string                `json:"location_meaning"`
+	Datastream_name  string                `json:"datastream_name"`
+	Input_files      string                `json:"input_files"`
+	History          string                `json:"history"`
+	Variables        []MeasurementVariable `json:"variables"`
+	HouseIndices     []string              `json:"houseindices"`    // these unique 2 indices are specific to Entity datasets.
+	LongtimeIndices  []string              `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
 }
 
 // Some variable names must be aliased in SQL statements: {time, }
@@ -133,12 +168,12 @@ func (cdf NetCDF) ToString(outputVariables bool) string {
 
 	if outputVariables {
 		for _, tv := range cdf.Variables {
-			sb.WriteString(" StandardName: " + tv.StandardName + "; ReturnType: " + tv.ReturnType + "; ")
-			if len(tv.LongName) > 0 {
-				sb.WriteString(" LongName: " + tv.LongName + ";")
+			sb.WriteString(" MeasurementName: " + tv.MeasurementItem.MeasurementName + "; ReturnType: " + tv.MeasurementItem.MeasurementType + "; ")
+			if len(tv.MeasurementItem.MeasurementAlias) > 0 {
+				sb.WriteString(" LongName: " + tv.MeasurementItem.MeasurementAlias + ";")
 			}
-			if len(tv.Units) > 0 {
-				sb.WriteString(" Units: " + tv.Units + ";")
+			if len(tv.MeasurementItem.MeasurementUnits) > 0 {
+				sb.WriteString(" Units: " + tv.MeasurementItem.MeasurementUnits + ";")
 			}
 			if len(tv.Comment) > 0 {
 				sb.WriteString(" Comment: " + tv.Comment + ";")
@@ -175,7 +210,7 @@ func (cdf NetCDF) Format_DBcreate() []string {
 	var encodeMap = map[string]string{"string": "PLAIN", "double": "RLE", "int": "RLE", "int64": "RLE", "bool": "PLAIN"}
 	lines := make([]string, 0)
 	for _, tv := range cdf.Variables { // Msg: 700: Error occurred while parsing SQL to physical plan: line 1:55 no viable alternative at input '.time'
-		str := "CREATE TIMESERIES " + cdf.Identifier + "." + cdf.StandardNameAlias(tv.StandardName) + " with datatype=" + cdfTypeMap[tv.ReturnType] + ", encoding=" + encodeMap[tv.ReturnType] + ";"
+		str := "CREATE TIMESERIES " + cdf.Identifier + "." + cdf.StandardNameAlias(tv.MeasurementItem.MeasurementName) + " with datatype=" + cdfTypeMap[tv.MeasurementItem.MeasurementType] + ", encoding=" + encodeMap[tv.MeasurementItem.MeasurementType] + ";"
 		lines = append(lines, str)
 	}
 	return lines
@@ -186,15 +221,15 @@ func (cdf NetCDF) FormattedColumnNames() string {
 	var sb strings.Builder
 	sb.WriteString("(")
 	for ndx := range cdf.Variables {
-		sb.WriteString(cdf.StandardNameAlias(cdf.Variables[ndx].StandardName) + ",")
+		sb.WriteString(cdf.StandardNameAlias(cdf.Variables[ndx].MeasurementName) + ",")
 	}
 	str := sb.String()[0:len(sb.String())-1] + ")"
 	return str
 }
 
-// General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs.
+// General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs. Why not simply make these queries?
 type DataStatistic struct {
-	StandardName      string         `json:"standardname"`
+	MeasurementName   string         `json:"standardname"`
 	NumberOfValues    int            `json:"numberofvalues"`
 	NumDistinctValues int            `json:"numdistinctvalues"`
 	MinimumValue      string         `json:"minimumvalue"`
@@ -202,14 +237,13 @@ type DataStatistic struct {
 	FrequencyMap      map[string]int `json:"frequencymap"`
 }
 
-// TODO: Read the rest of the data from the *.nc files.
 // type DataStatistic struct { NumDistinctValues int    `json:"numdistinctvalues"`  insert into map.
 func (cdf NetCDF) Format_DBinsert() ([]string, []DataStatistic) {
 	lines := make([]string, 0)
 	var sb strings.Builder
-	dataStats := make([]DataStatistic, len(cdf.Variables))                               //<<< cdf.FormattedColumnNames()
-	columnNames := "(Time," + cdf.StandardNameAlias(cdf.Variables[0].StandardName) + ")" // constant first column (Time,id)
-	sb.WriteString("INSERT INTO " + cdf.Identifier + columnNames + " VALUES ")           // That's right -- the column names don't match the actual data columns.
+	dataStats := make([]DataStatistic, len(cdf.Variables))                                  //<<< cdf.FormattedColumnNames()
+	columnNames := "(Time," + cdf.StandardNameAlias(cdf.Variables[0].MeasurementName) + ")" // constant first column (Time,id)
+	sb.WriteString("INSERT INTO " + cdf.Identifier + columnNames + " VALUES ")              // That's right -- the column names don't match the actual data columns.
 	dv1min := "~"
 	dv1max := " "
 	dv2min := "~"
@@ -217,7 +251,7 @@ func (cdf NetCDF) Format_DBinsert() ([]string, []DataStatistic) {
 
 	for NDX := 0; NDX < 1; NDX++ { // cdf.Variables <<<
 		tv := cdf.Variables[NDX]
-		dataStatistic := DataStatistic{StandardName: tv.StandardName, NumberOfValues: cdf.Dimensions[tv.StandardName]}
+		dataStatistic := DataStatistic{MeasurementName: tv.MeasurementName, NumberOfValues: cdf.Dimensions[tv.MeasurementName]}
 		for ndx := 0; ndx < len(cdf.HouseIndices); ndx++ {
 			dv1 := strings.TrimSpace(cdf.HouseIndices[ndx])
 			dv2 := strings.TrimSpace(cdf.LongtimeIndices[ndx])
@@ -250,21 +284,76 @@ func (cdf NetCDF) Format_DBinsert() ([]string, []DataStatistic) {
 	return lines, dataStats
 }
 
+// Write the validating SPARQL construct/query to a file.
 func (cdf NetCDF) Format_SparqlQuery() []string {
 	output := make([]string, 0)
-	//<<<
+	/*
+		# queries
+
+		select (?eventLabel as ?Event_Label) (?value as ?Value) where {
+		?salesRegion salesRegion:code ?SalesRegionCode.
+		   ?timeSeries timeSeries:appliesTo ?salesRegion.
+		   ?timeSeries timeSeries:metric ?metric.
+		   ?measure measurement:metric ?metric.
+		   ?metric metric:code ?MetricCode.
+		   ?metric metric:units ?currency.
+		?currency currency:mask ?format.
+		   ?measure measurement:metricEvent ?event.
+		   ?measure measurement:value ?unformattedValue.
+		   bind (fn:formatNumber(?unformattedValue,?format) as ?value
+		   ?event rdfs:label ?eventLabel.
+		   ?event event:startDateTime ?startTime.
+		} order by ?startTime,
+		{salesRegionCode:"PNW",
+		 metricCode:"RevDef121"}
+
+		select (sum(?value) as ?Sum) (avg(?value) as ?Average) where {
+		?salesRegion salesRegion:code ?SalesRegionCode.
+		   ?timeSeries timeSeries:appliesTo ?salesRegion.
+		   ?timeSeries timeSeries:metric ?metric.
+		   ?measure measurement:metric ?metric.
+		   ?metric metric:code ?MetricCode.
+		   ?metric metric:units ?currency.
+		   ?measure measurement:metricEvent ?event.
+		   ?measure measurement:value ?unformattedValue.
+		   bind (fn:formatNumber(?unformattedValue,?format) as ?value
+		   ?event rdfs:label ?eventLabel.
+		   ?event event:startDateTime ?startTime.
+		} order by ?startTime,
+		{SalesRegionCode:"PNW",
+		 MetricCode:"RevDef121"}
+
+		 select
+		 ?SalesRegionCode (sum(?value) as ?Sum) (avg(?value) as ?Average) where {
+		   ?salesRegion salesRegion:code ?SalesRegionCode.
+		   ?timeSeries timeSeries:appliesTo ?salesRegion.
+		   ?timeSeries timeSeries:metric ?metric.
+		   ?measure measurement:metric ?metric.
+		   ?metric metric:code $metricCode.
+		   ?metric metric:units ?currency.
+		   ?currency currency:mask ?format.
+		   ?measure measurement:metricEvent ?event.
+		   ?measure measurement:value ?unformattedValue.
+		   bind (fn:formatNumber(?unformattedValue,?format) as ?value
+		   ?event rdfs:label ?eventLabel.
+		   ?event event:startDateTime ?startTime.
+		} order by ?SalesRegionCode ?startTime
+		group by ?SalesRegionCode,
+		{metricCode:"RevDef121"}
+	*/
 	return output
 }
 
-// Make the dataset its own Class and loadable into GraphDB as Named Graph. Produce DatatypeProperty ontology from dataset.
-// Special handling: "dateTime", "XMLLiteral", "anyURI"
-func (cdf NetCDF) Format_TurtleOntology() []string {
+// Make the dataset its own Class and loadable into GraphDB as Named Graph. Produce specific DatatypeProperty ontology from dataset.
+// Special handling: "dateTime", "XMLLiteral", "anyURI". Problem: classic Turtle does not support named graphs. Must output in TRiG format.
+func (cdf NetCDF) Format_Ontology() []string {
 	const crlf = `\n`
-	fmt.Println(">>>>>>NetCDF.Format_TurtleOntology")
-	var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
-
+	identifier := cdf.Identifier
+	title := cdf.Title
+	description := cdf.Description
+	// also cdf.Variables
 	baseline := `@prefix s4data: ` + DataSetPrefix + `> .` + crlf +
-		`@prefix example: ` + DataSetPrefix + cdf.Identifier + `/> .` + crlf +
+		`@prefix example: ` + DataSetPrefix + identifier + `/> .` + crlf +
 		`@prefix foaf: <http://xmlns.com/foaf/spec/#> .` + crlf +
 		`@prefix geosp: <http://www.opengis.net/ont/geosparql#> .` + crlf +
 		`@prefix obo: <http://purl.obolibrary.org/obo/> .` + crlf +
@@ -280,13 +369,33 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		`@prefix dcterms: <http://purl.org/dc/terms/> .` + crlf +
 		`@prefix dctype: <http://purl.org/dc/dcmitype/> .` + crlf +
 
-		DataSetPrefix + cdf.Identifier + `#> a dctype:Dataset ;` + crlf +
-		`dcterms:title "` + cdf.Title + `"@en ;` + crlf +
-		`dcterms:description "` + cdf.Description + `"@en .` + crlf +
+		DataSetPrefix + identifier + `#> a dctype:Dataset ;` + crlf +
+		`dcterms:title "` + title + `"@en ;` + crlf +
+		`dcterms:description "` + description + `"@en .` + crlf +
 		`dcterms:license <https://forge.etsi.org/etsi-software-license> ;` + crlf +
 		`dcterms:conformsTo <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
-		`dcterms:conformsTo <https://saref.etsi.org/saref4core/v3.1.1/> ;` + crlf +
 		crlf +
+		// extension class declarations for domains, ranges, rdfs:isDefinedBy
+		`###  https://saref.etsi.org/core/Time` + crlf +
+		`saref:Time rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/core/UnitOfMeasure` + crlf +
+		`saref:UnitOfMeasure rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4ehaw/MeasurementFunction` + crlf +
+		`s4ehaw:MeasurementFunction rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4ehaw/Data` + crlf +
+		`s4ehaw:Data rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4envi/FrequencyUnit` + crlf +
+		`s4envi:FrequencyUnit rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4envi/FrequencyMeasurement` + crlf +
+		`s4envi:FrequencyMeasurement rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4auto/Confidence` + crlf +
+		`s4auto:Confidence rdf:type owl:Class ;` + crlf +
 		// new common Classes
 		`###  https://saref.etsi.org/saref4data/StartTimeseries` + crlf +
 		`s4data:StartTimeseries rdf:type owl:Class ;` + crlf +
@@ -303,8 +412,13 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		// new common ObjectProperty
 		`###  https://saref.etsi.org/saref4data/hasEquation` + crlf +
 		`s4data:hasEquation rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the entire timeseries dataset is represented by an equation of type linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the entire timeseries dataset is represented by a type of equation such as {linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential}."@en ;` + crlf +
 		` rdfs:label "has equation"@en .` + crlf +
+		crlf +
+		`###  https://saref.etsi.org/saref4data/hasDistribution` + crlf +
+		`s4data:hasDistribution rdf:type owl:ObjectProperty ;` + crlf +
+		` rdfs:comment "A relationship indicating that the entire timeseries dataset is accurately represented by a type of discrete or continuous distribution such as {Uniform, Bernoulli, Binomial, Poisson; Normal, Student_t_test, Exponential, Gamma, Weibull}."@en ;` + crlf +
+		` rdfs:label "has distribution"@en .` + crlf +
 		crlf +
 		`###  https://saref.etsi.org/saref4data/isPriorTo` + crlf +
 		`s4data:isPriorTo rdf:type owl:ObjectProperty ;` + crlf +
@@ -318,8 +432,16 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		crlf +
 		`###  https://saref.etsi.org/saref4data/isComparableTo` + crlf +
 		`s4data:isComparableTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset can be logically compared to another dataset. Necessary condition: Units must agree. Sufficient condition: equation types must agree."@en ;` + crlf +
-		` rdfs:label "is Bayesian posterior to "@en .` + crlf +
+		` rdfs:comment "A relationship indicating that the timeseries dataset can be logically compared to another dataset. Necessary condition: type of Units and type of Distribution must agree. Sufficient condition: type of Equation must agree."@en ;` + crlf +
+		` rdfs:label "is comparable to "@en .` + crlf +
+		crlf +
+		// non-core ObjectProperty extension references:
+		`###  https://saref.etsi.org/saref4ehaw/hasTimeSeriesMeasurement` + crlf + // s4ehaw:
+		`s4ehaw:hasTimeSeriesMeasurement rdf:type owl:ObjectProperty ;` + crlf +
+		` rdfs:domain s4ehaw:Data ;` + crlf +
+		` rdfs:range s4ehaw:TimeseriesMeasurement ;` + crlf +
+		` rdfs:comment "Data has time series measurements, a sequence taken at successive equally spaced points in time."@en ;` + crlf +
+		` rdfs:label "has time series measurement"@en .` + crlf +
 		crlf +
 		// new common DatatypeProperty
 		`###  https://saref.etsi.org/saref4data/isAlignedWithTimeseries` + crlf +
@@ -346,20 +468,35 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		` rdfs:comment "The lowest value in the timeseries."@en ;` + crlf +
 		` rdfs:label "has lower limit value"@en .` + crlf +
 		crlf +
-		`###  https://saref.etsi.org/saref4data/hasNumericPrecisionValue` + crlf +
-		`s4data:hasNumericPrecisionValue rdf:type owl:DatatypeProperty ;` + crlf +
+		`###  https://saref.etsi.org/saref4data/hasNumericPrecision` + crlf +
+		`s4data:hasNumericPrecision rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:integer ;` + crlf +
-		` rdfs:comment "Indicates the number of leading and trailing significant digits in the measurement."@en ;` + crlf +
-		` rdfs:label "available ram"@en .` + crlf +
+		` rdfs:comment "Indicates the number of trailing significant digits in the measurement."@en ;` + crlf +
+		` rdfs:label "has numeric precision"@en .` + crlf +
 		crlf +
-
-		// define the dataset Class derieved from saref:Measurement:
-		`### ` + DataSetPrefix + cdf.Identifier + crlf +
-		`s4data:` + cdf.Identifier + ` rdf:type owl:Class ;` + crlf +
+		// non-core DatatypeProperty extension references:
+		`###  https://saref.etsi.org/saref4data/hasFrequencyMeasurement` + crlf + // s4envi
+		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
+		` rdfs:isDefinedBy <https://saref.etsi.org/saref4envi/hasFrequencyMeasurement> ;` + crlf +
+		` rdfs:comment "The relation between a device and the frequency in which it makes measurements."@en ;` + crlf +
+		` rdfs:label "has frequency measurement"@en .` + crlf +
+		`###  https://saref.etsi.org/saref4data/hasConfidence` + crlf + // s4auto
+		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
+		` rdfs:isDefinedBy <https://saref.etsi.org/saref4auto/hasConfidence> ;` + crlf +
+		` rdfs:comment "A relation between an estimated measurement (saref:Measurement class) and its confidence (s4auto:Confidence)"@en ;` + crlf +
+		` rdfs:label "has confidence"@en .` + crlf +
+		crlf +
+		// define the dataset Class derived from various saref Classes but NOT s4ehaw:TimeSeriesMeasurement because that demands rdf:Seq or rdf:List.
+		`### ` + DataSetPrefix + identifier + crlf +
+		`s4data:` + identifier + ` rdf:type owl:Class ;` + crlf +
 		` rdfs:subClassOf saref:Measurement ,` + crlf +
-		` rdfs:comment "` + cdf.Description + `"@en ;` + crlf +
-		` rdfs:label "` + cdf.Identifier + `"@en .` + crlf +
-		// Add standard Measurement properties
+		` rdfs:comment "` + description + `"@en ;` + crlf +
+		` rdfs:label "` + identifier + `"@en .` + crlf +
+		` rdfs:subClassOf saref:Time ,` + crlf +
+		` rdfs:subClassOf saref:UnitOfMeasure ,` + crlf +
+		` rdfs:subClassOf s4envi:FrequencyUnit ,` + crlf +
+		` rdfs:subClassOf s4envi:FrequencyMeasurement ,` + crlf +
+		// common Measurement properties
 		` rdfs:subClassOf [` + crlf +
 		`  rdf:type owl:Restriction ;` + crlf +
 		`  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
@@ -372,6 +509,7 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		`  owl:onClass s4data:EndTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		` ] ;` + crlf +
+		// core Measurement properties
 		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		`  owl:allValuesFrom saref:Time` + crlf +
@@ -387,10 +525,6 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:onProperty saref:measurementMadeBy ;` + crlf +
 		`  owl:someValuesFrom saref:Device` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:hasConfidence ;` + crlf +
-		`  owl:someValuesFrom saref:Confidence` + crlf +
 		` ] ,` + crlf +
 		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:onProperty saref:isMeasuredIn ;` + crlf +
@@ -413,14 +547,19 @@ func (cdf NetCDF) Format_TurtleOntology() []string {
 		`  owl:onProperty saref:hasValue ;` + crlf +
 		`  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
 		`  owl:onDataRange xsd:float` + crlf +
-		` ] ; .` + crlf
+		` ] ; .` + crlf +
+		// extension Measurement properties
+		` [ rdf:type owl:Restriction ;` + crlf + // s4auto
+		`  owl:onProperty s4auto:hasConfidence ;` + crlf +
+		`  owl:someValuesFrom s4auto:Confidence` + crlf +
+		` ] ,` + crlf
 
 	output := strings.Split(baseline, crlf)
 	// add specific field names as DatatypeProperties:
 	for _, v := range cdf.Variables {
-		eva, _ := GetClosestEntity(cdf.Identifier) // graphdb.EntityVariableAlias
+		eva, _ := GetClosestEntity(identifier) // graphdb.EntityVariableAlias
 		fmt.Println(eva.ParentClassIRI())
-		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf+`[ rdf:type owl:Restriction ;`+crlf+`owl:onProperty :has`+v.StandardName+` ;`+crlf+`owl:allValuesFrom xsd:`+xsdDatatypeMap[v.ReturnType]+crlf+`] ; .`+crlf+crlf)
+		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf+`[ rdf:type owl:Restriction ;`+crlf+`owl:onProperty :has`+v.MeasurementItem.MeasurementName+` ;`+crlf+`owl:allValuesFrom xsd:`+xsdDatatypeMap[v.MeasurementItem.MeasurementType]+crlf+`] ; .`+crlf+crlf)
 	}
 
 	return output
@@ -475,7 +614,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 		netcdf.Identifier = identifier
 	}
 	netcdf.Dimensions = make(map[string]int, 0)
-	netcdf.Variables = make([]CDFvariable, 0)
+	netcdf.Variables = make([]MeasurementVariable, 0)
 	lineIndex++
 
 	if strings.Contains(lines[lineIndex], "dimensions:") {
@@ -503,6 +642,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 	}
 
 	if strings.Contains(lines[lineIndex], "variables:") {
+		columnIndex := 0
 		offset := 1
 		data := strings.Contains(lines[lineIndex], "data:")
 		for !data {
@@ -512,26 +652,31 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			}
 			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
 			standardname := strings.Split(tokens[1], "(")[0]
-			tmpVar := CDFvariable{ReturnType: tokens[0], StandardName: standardname}
-			val, ok := dimensionMap[tmpVar.StandardName]
+			tmpVar := MeasurementVariable{} // REFACTOR(test)
+			tmpVar.MeasurementItem.MeasurementName = standardname
+			tmpVar.MeasurementItem.MeasurementAlias = standardname
+			tmpVar.MeasurementItem.MeasurementType = tokens[0]
+			val, ok := dimensionMap[tmpVar.MeasurementItem.MeasurementName]
 			if ok {
 				tmpVar.DimensionIndex = val
 			}
-			thisVariable := strings.Contains(lines[lineIndex], tmpVar.StandardName)
+			thisVariable := strings.Contains(lines[lineIndex], tmpVar.MeasurementItem.MeasurementName)
 			for thisVariable {
+				tmpVar.MeasurementItem.ColumnOrder = columnIndex
+				columnIndex++
 				lineIndex++
 				tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), "=")
-				if strings.Contains(lines[lineIndex], ":_FillValue") {
-					tmpVar.FillValue = prettifyString(tokens[offset])
-				}
 				if strings.Contains(lines[lineIndex], ":units") {
-					tmpVar.Units = prettifyString(tokens[offset])
+					tmpVar.MeasurementItem.MeasurementUnits = prettifyString(tokens[offset])
 				}
 				if strings.Contains(lines[lineIndex], ":standard_name") {
-					tmpVar.StandardName = prettifyString(tokens[offset])
+					tmpVar.MeasurementItem.MeasurementName = prettifyString(tokens[offset])
 				}
 				if strings.Contains(lines[lineIndex], ":long_name") {
-					tmpVar.LongName = prettifyString(tokens[offset])
+					tmpVar.MeasurementItem.MeasurementAlias = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":_FillValue") {
+					tmpVar.FillValue = prettifyString(tokens[offset])
 				}
 				if strings.Contains(lines[lineIndex], ":comment") {
 					tmpVar.Comment = prettifyString(tokens[offset])
@@ -539,7 +684,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 				if strings.Contains(lines[lineIndex], ":calendar") {
 					tmpVar.Calendar = prettifyString(tokens[offset])
 				}
-				thisVariable = strings.Contains(lines[lineIndex+1], tmpVar.StandardName+":")
+				thisVariable = strings.Contains(lines[lineIndex+1], tmpVar.MeasurementItem.MeasurementName+":")
 			}
 			netcdf.Variables = append(netcdf.Variables, tmpVar)
 		}
@@ -705,7 +850,7 @@ func LoadNcSensorDataIntoDatabase(programArgs []string) {
 	err = UploadFile(DataSetPrefix+inputFile+".json", json)
 	checkErr("UploadFile: "+inputFile+".json", err)
 
-	ontology := netcdf.Format_TurtleOntology()
+	ontology := netcdf.Format_Ontology()
 	err = fs.WriteTextLines(ontology, inputFile+".ttl", false)
 	checkErr("fs.WriteTextLines(ttl)", err)
 	err = UploadFile(DataSetPrefix+inputFile+".ttl", ontology)
@@ -1476,15 +1621,21 @@ const (
 	LastColumnName = "DatasetName"
 )
 
-//var recommendedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339", "unicode,string", "unixutc,long", "m/h,meters/hour", "knots,knots","percent,percent" }
+//var formattedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339", "unicode,string", "unixutc,long", "m/h,meters/hour", "knots,knots","percent,percent" }
 
-// Manually add the map keys to the (last) units column header. All of these are specified at uomPrefix URI.
-// If th value contains a comma, call GetGetNamedIndividualFormat() instead.
+// Return a formatted value based upon the imported unit_of_measure.
+func GetFormattedUnitMeasure(value, uom string) string {
+	return "???"
+}
+
+// Return a NamedIndividual unit_of_measure from an abreviated key. All of these are specified at the uomPrefix URI.
+// This expects you to manually add the map keys to the (last) Units column header in every *.var file.
+// If the Units value contains a comma, then call GetFormattedUnitMeasure() instead.
 func GetNamedIndividualUnitMeasure(uom string) string {
 	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
 	var unitsOfMeasure = map[string]string{
 		"kW":     uomPrefix + "kilowatt",
-		"kWh":    uomPrefix + "kilowattHour",
+		"kWh":    uomPrefix + "kilowattHour", // timeseries (are these averaged values?)
 		"pascal": uomPrefix + "pascal",
 		"kelvin": uomPrefix + "kelvin",
 		"°C":     uomPrefix + "degreeCelsius",
@@ -1579,7 +1730,8 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 var timeSeriesCommands = []string{"drop", "create", "delete", "insert", "example"}
 var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
 var iotdbParameters IoTDbProgramParameters
-var session client.Session
+
+// var session client.Session
 var clientConfig *client.Config
 
 // All ports must be open.
@@ -1690,19 +1842,6 @@ func Init_IoTDB() (bool, string) {
 		return false, connectStr
 	}
 	return true, connectStr
-}
-
-// mapped to original column name
-type MeasurementItem struct {
-	MeasurementName  string `json:"measurementname"`  // Original name always single-quoted
-	MeasurementAlias string `json:"measurementalias"` // Names that fit IotDB format; see StandardName() => [0-9 a-z A-Z _ ]
-	MeasurementType  string `json:"measurementtype"`  // XSD data type
-	MeasurementUnits string `json:"measurementunits"`
-	ColumnOrder      int    `json:"columnorder"` // Column order from data file
-}
-
-func (mi MeasurementItem) ToString() string {
-	return mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
 }
 
 type IoTDbDataFile struct {
@@ -1941,90 +2080,8 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
 // Make the dataset its own Class and loadable into GraphDB as Named Graph. Special handling: "dateTime", "XMLLiteral", "anyURI"
-func (iot *IoTDbDataFile) Format_TurtleOntology() []string {
-	fmt.Println(">>>>>>IoTDbDataFile.Format_TurtleOntology")                                                                                                                       //<<<
-	var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
-	output := make([]string, 256)                                                                                                                                                  // best guess
-	output[0] = "@prefix s4data: " + OutputLocation + "> ."
-	output[1] = "@prefix example: " + OutputLocation + iot.DatasetName + "/> ."
-
-	output[2] = "@prefix foaf: <http://xmlns.com/foaf/spec/#> ."
-	output[3] = "@prefix geosp: <http://www.opengis.net/ont/geosparql#> ."
-	output[4] = "@prefix obo: <http://purl.obolibrary.org/obo/> ."
-	output[5] = "@prefix org: <https://schema.org/> ."
-	output[6] = "@prefix owl: <http://www.w3.org/2002/07/owl#> ."
-	output[7] = "@prefix org: <https://schema.org/> ."
-	output[8] = "@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> ."
-	output[9] = "@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> ."
-	output[10] = "@prefix saref: " + SarefEtsiOrg + "core/> ."
-	output[11] = "@prefix ssn: <http://www.w3.org/ns/ssn/> ."
-	output[12] = "@prefix time: <http://www.w3.org/2006/time#> ."
-	output[13] = "@prefix xsd: <http://www.w3.org/2001/XMLSchema#> ."
-	output[14] = "@prefix dcterms: <http://purl.org/dc/terms/> ."
-	output[15] = "@prefix dctype: <http://purl.org/dc/dcmitype/> ."
-
-	output[16] = OutputLocation + iot.DatasetName + "#> a dctype:Dataset ;"
-	output[17] = `dcterms:title "` + iot.Description + `"@en ;`
-	output[18] = `dcterms:description "` + iot.DatasetName + `"@en .`
-	output[19] = "dcterms:license <https://forge.etsi.org/etsi-software-license> ;"
-	output[20] = "dcterms:conformsTo <https://saref.etsi.org/core/v3.1.1/> ;"
-	output[21] = "dcterms:conformsTo <https://saref.etsi.org/saref4core/v3.1.1/> ;"
-
-	output[21] = "### " + OutputLocation + iot.DatasetName
-	output[22] = "s4data:" + iot.DatasetName + " rdf:type owl:Class ;"
-	output[23] = `rdfs:comment "` + iot.Description + `"@en ;`
-	output[24] = `rdfs:label "` + iot.DatasetName + `"@en .`
-
-	eva, _ := GetClosestEntity("variableName") // (EntityVariableAlias, error)
-	output[25] = `rdfs:subClassOf ` + eva.ParentClassIRI() + " ,"
-	output[26] = "[ rdf:type owl:Restriction ;"
-	output[27] = "owl:onProperty saref:measurementMadeBy ;"
-	output[28] = "owl:someValuesFrom saref:Device"
-	output[29] = "] ,"
-	output[30] = "[ rdf:type owl:Restriction ;"
-	output[31] = "owl:onProperty saref:hasConfidence ;"
-	output[32] = "owl:someValuesFrom saref:Confidence"
-	output[33] = "] ,"
-	output[34] = "[ rdf:type owl:Restriction ;"
-	output[35] = "owl:onProperty saref:isMeasuredIn ;"
-	output[36] = "owl:allValuesFrom saref:UnitOfMeasure"
-	output[37] = "] ,"
-	output[38] = "[ rdf:type owl:Restriction ;"
-	output[39] = "owl:onProperty saref:relatesToProperty ;"
-	output[40] = "owl:allValuesFrom saref:Property"
-	output[41] = "] ,"
-	output[42] = "[ rdf:type owl:Restriction ;"
-	output[43] = "owl:onProperty saref:isMeasuredIn ;"
-	output[44] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
-	output[45] = "owl:onClass saref:UnitOfMeasure:"
-	output[46] = "] ,"
-	output[47] = "[ rdf:type owl:Restriction ;"
-	output[48] = "owl:onProperty saref:relatesToProperty ;"
-	output[49] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
-	output[50] = "owl:onClass saref:Property"
-	output[51] = "] ,"
-	output[52] = "[ rdf:type owl:Restriction ;"
-	output[53] = "owl:onProperty saref:hasTimestamp ;"
-	output[54] = "owl:allValuesFrom xsd:dateTime"
-	output[55] = "] ,"
-	output[56] = "[ rdf:type owl:Restriction ;"
-	output[57] = "owl:onProperty saref:hasValue ;"
-	output[58] = `owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;`
-	output[59] = "owl:onDataRange xsd:float"
-	output[60] = "] ; ."
-	index := 60
-	// add specific field names as DatatypeProperties.
-	for _, item := range iot.Measurements {
-		index++
-		output[index] = "[ rdf:type owl:Restriction ;"
-		index++
-		output[index] = "owl:onProperty :has" + item.MeasurementName + " ;" // item.MeasurementAlias, item.MeasurementUnits
-		index++
-		output[index] = "owl:allValuesFrom xsd:" + xsdDatatypeMap[item.MeasurementType]
-		index++
-		output[index] = "] ; ."
-	}
-	return output
+func (iot *IoTDbDataFile) Format_Ontology() []string {
+	return []string{}
 }
 
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
@@ -2116,7 +2173,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			fmt.Println()
 
 		case "example": // output saref ttl class file:
-			ttlLines := iot.Format_TurtleOntology()
+			ttlLines := iot.Format_Ontology()
 			err := fs.WriteTextLines(ttlLines, iot.DataFilePath+".ttl", false)
 			checkErr("WriteTextLines(ttl.output", err)
 
