@@ -368,6 +368,10 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .` + crlf +
 		`@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .` + crlf +
 		`@prefix saref: <` + SarefEtsiOrg + `core/> .` + crlf +
+		// include all referenced extensions here without the version nnumber:
+		`@prefix s4ehaw: <` + SarefEtsiOrg + `saref4ehaw/> .` + crlf +
+		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
+		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
 		`@prefix ssn: <http://www.w3.org/ns/ssn/> .` + crlf +
 		`@prefix time: <http://www.w3.org/2006/time#> .` + crlf +
 		`@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .` + crlf +
@@ -377,9 +381,13 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`    owl:versionInfo "v3.1.1" ;` + crlf +
 		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
 		`dcterms:title "` + title + `"@en ;` + crlf +
-		`dcterms:description "` + description + `"@en .` + crlf +
+		`dcterms:description "` + description + `"@en ;` + crlf +
 		`dcterms:license <https://forge.etsi.org/etsi-software-license> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf + // include every referenced extension!
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
 		crlf +
 		// extension class declarations for domains, ranges, rdfs:isDefinedBy
 		`###  ` + SarefEtsiOrg + `core/Time` + crlf +
@@ -401,7 +409,8 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`s4envi:FrequencyMeasurement rdf:type owl:Class .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + `saref4auto/Confidence` + crlf +
-		`s4auto:Confidence rdf:type owl:Class ;` + crlf +
+		`s4auto:Confidence rdf:type owl:Class .` + crlf +
+		crlf +
 		// new common Classes
 		`###  ` + SarefEtsiOrg + SarefExtension + `StartTimeseries` + crlf +
 		`s4data:StartTimeseries rdf:type owl:Class ;` + crlf +
@@ -496,22 +505,15 @@ func (cdf NetCDF) Format_Ontology() []string {
 		// define the dataset Class derived from various saref Classes but NOT s4ehaw:TimeSeriesMeasurement because that demands rdf:Seq or rdf:List.
 		`### ` + DataSetPrefix + identifier + crlf +
 		`s4data:` + identifier + ` rdf:type owl:Class ;` + crlf +
-		` rdfs:subClassOf saref:Measurement ,` + crlf +
-		` rdfs:comment "` + description + `"@en ;` + crlf +
-		` rdfs:label "` + identifier + `"@en .` + crlf +
-		` rdfs:subClassOf saref:Time ,` + crlf +
-		` rdfs:subClassOf saref:UnitOfMeasure ,` + crlf +
-		` rdfs:subClassOf s4envi:FrequencyUnit ,` + crlf +
-		` rdfs:subClassOf s4envi:FrequencyMeasurement ,` + crlf +
-		// common Measurement properties
-		` rdfs:subClassOf [` + crlf +
+		` rdfs:subClassOf saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ,` + crlf +
+		// common Measurement properties;
+		` [` + crlf +
 		`  rdf:type owl:Restriction ;` + crlf +
 		`  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
 		`  owl:onClass s4data:StartTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		` ] ,` + crlf +
-		` rdfs:subClassOf [` + crlf +
-		`  rdf:type owl:Restriction ;` + crlf +
+		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
 		`  owl:onClass s4data:EndTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
@@ -521,7 +523,7 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		`  owl:allValuesFrom saref:Time` + crlf +
 		` ] ,` + crlf +
-		` [ a owl:Restriction ;` + crlf +
+		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:onProperty saref:hasMeasurement ;` + crlf +
 		`  owl:allValuesFrom saref:Measurement ` + crlf +
 		` ] ,` + crlf +
@@ -562,12 +564,18 @@ func (cdf NetCDF) Format_Ontology() []string {
 		` ] ,` + crlf + crlf
 
 	output := strings.Split(baseline, crlf)
-	// add specific field names as DatatypeProperties:
-	for _, v := range cdf.Variables {
-		eva, _ := GetClosestEntity(identifier) // graphdb.EntityVariableAlias
-		fmt.Println(eva.ParentClassIRI())      //<<<< need trailing semi-colon
-		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf+`[ rdf:type owl:Restriction ;`+crlf+`owl:onProperty :has`+v.MeasurementItem.MeasurementName+` ;`+crlf+`owl:allValuesFrom xsd:`+xsdDatatypeMap[v.MeasurementItem.MeasurementType]+crlf+`] ,`+crlf+crlf)
+	// add specific field names as DatatypeProperties: eva, _ := GetClosestEntity(identifier)  ` rdfs:subClassOf ` + eva.ParentClassIRI() + ` ,` + crlf +
+	for ndx, v := range cdf.Variables {
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty s4data:has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
+		if ndx < len(cdf.Variables)-1 {
+			str += `] , ` + crlf
+		} else {
+			str += `] ; ` + crlf
+		}
+		output = append(output, str)
 	}
+	output = append(output, ` rdfs:comment "`+description+`"@en ;`+crlf)
+	output = append(output, ` rdfs:label "`+identifier+`"@en .`+crlf)
 
 	return output
 }
@@ -1325,6 +1333,8 @@ func GetClosestEntity(varName string) (EntityVariableAlias, error) {
 	}
 	if len(similarOutputs) > 0 {
 		eva.SarefEntityIRI = map[string]float64{similarOutputs[0].Uri: similarOutputs[0].Score}
+	} else {
+		eva.SarefEntityIRI = map[string]float64{"owl:Thing": 1.0} // default
 	}
 	return eva, nil
 }
@@ -2091,8 +2101,8 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 	identifier := iot.DatasetName
 	title := iot.DatasetName
 	description := iot.Description
-	baseline := `@prefix s4data: ` + DataSetPrefix + `> .` + crlf +
-		`@prefix ex: ` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
+	baseline := `@prefix s4data: <` + DataSetPrefix + `> .` + crlf +
+		`@prefix ex: <` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
 		`@prefix foaf: <http://xmlns.com/foaf/spec/#> .` + crlf +
 		`@prefix geosp: <http://www.opengis.net/ont/geosparql#> .` + crlf +
 		`@prefix obo: <http://purl.obolibrary.org/obo/> .` + crlf +
@@ -2102,6 +2112,10 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .` + crlf +
 		`@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .` + crlf +
 		`@prefix saref: <` + SarefEtsiOrg + `core/> .` + crlf +
+		// include all referenced extensions here without the version nnumber:
+		`@prefix s4ehaw: <` + SarefEtsiOrg + `saref4ehaw/> .` + crlf +
+		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
+		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
 		`@prefix ssn: <http://www.w3.org/ns/ssn/> .` + crlf +
 		`@prefix time: <http://www.w3.org/2006/time#> .` + crlf +
 		`@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .` + crlf +
@@ -2109,12 +2123,15 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		`@prefix dctype: <http://purl.org/dc/dcmitype/> .` + crlf +
 		`<` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> rdf:type owl:Ontology ;` + crlf +
 		`    owl:versionInfo "v3.1.1" ;` + crlf +
-		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf + //<<<
+		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
 		`dcterms:title "` + title + `"@en ;` + crlf +
-		`dcterms:description "` + description + `"@en .` + crlf +
+		`dcterms:description "` + description + `"@en ;` + crlf +
 		`dcterms:license <https://forge.etsi.org/etsi-software-license> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> ;` +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf + // include every referenced extension!
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
+		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
 		crlf +
 		// extension class declarations for domains, ranges, rdfs:isDefinedBy
 		`###  ` + SarefEtsiOrg + `core/Time` + crlf +
@@ -2136,7 +2153,8 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		`s4envi:FrequencyMeasurement rdf:type owl:Class .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + `saref4auto/Confidence` + crlf +
-		`s4auto:Confidence rdf:type owl:Class ;` + crlf +
+		`s4auto:Confidence rdf:type owl:Class .` + crlf +
+		crlf +
 		// new common Classes
 		`###  ` + SarefEtsiOrg + SarefExtension + `StartTimeseries` + crlf +
 		`s4data:StartTimeseries rdf:type owl:Class ;` + crlf +
@@ -2231,22 +2249,15 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		// define the dataset Class derived from various saref Classes but NOT s4ehaw:TimeSeriesMeasurement because that demands rdf:Seq or rdf:List.
 		`### ` + DataSetPrefix + identifier + crlf +
 		`s4data:` + identifier + ` rdf:type owl:Class ;` + crlf +
-		` rdfs:subClassOf saref:Measurement ,` + crlf +
-		` rdfs:comment "` + description + `"@en ;` + crlf +
-		` rdfs:label "` + identifier + `"@en .` + crlf +
-		` rdfs:subClassOf saref:Time ,` + crlf +
-		` rdfs:subClassOf saref:UnitOfMeasure ,` + crlf +
-		` rdfs:subClassOf s4envi:FrequencyUnit ,` + crlf +
-		` rdfs:subClassOf s4envi:FrequencyMeasurement ,` + crlf +
-		// common Measurement properties
-		` rdfs:subClassOf [` + crlf +
+		` rdfs:subClassOf saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ,` + crlf +
+		// common Measurement properties;
+		` [` + crlf +
 		`  rdf:type owl:Restriction ;` + crlf +
 		`  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
 		`  owl:onClass s4data:StartTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		` ] ,` + crlf +
-		` rdfs:subClassOf [` + crlf +
-		`  rdf:type owl:Restriction ;` + crlf +
+		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
 		`  owl:onClass s4data:EndTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
@@ -2256,7 +2267,7 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		`  owl:allValuesFrom saref:Time` + crlf +
 		` ] ,` + crlf +
-		` [ a owl:Restriction ;` + crlf +
+		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:onProperty saref:hasMeasurement ;` + crlf +
 		`  owl:allValuesFrom saref:Measurement ` + crlf +
 		` ] ,` + crlf +
@@ -2297,13 +2308,21 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 		` ] ,` + crlf
 
 	output := strings.Split(baseline, crlf)
-	// add specific field names as DatatypeProperties:
-	//	Measurements       map[string]MeasurementItem `json:"measurements"`
-	for key, v := range iot.Measurements {
-		eva, _ := GetClosestEntity(key)   // graphdb.EntityVariableAlias
-		fmt.Println(eva.ParentClassIRI()) //<<<<
-		output = append(output, ` rdfs:subClassOf `+eva.ParentClassIRI()+` ,`+crlf+`[ rdf:type owl:Restriction ;`+crlf+`owl:onProperty :has`+v.MeasurementName+` ;`+crlf+`owl:allValuesFrom xsd:`+xsdDatatypeMap[v.MeasurementType]+crlf+`] ; .`+crlf+crlf)
+	// add specific field names as DatatypeProperties: this section is different from the one in cdf.Format_Ontology().
+	ndx := 0
+	for _, v := range iot.Measurements {
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty s4data:has` + v.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementType] + crlf
+		if ndx < len(iot.Measurements)-1 {
+			str += `] , ` + crlf
+		} else {
+			str += `] ; ` + crlf
+		}
+		ndx++
+		output = append(output, str)
 	}
+	output = append(output, ` rdfs:comment "`+description+`"@en ;`+crlf)
+	output = append(output, ` rdfs:label "`+identifier+`"@en .`+crlf)
+
 	return output
 }
 
