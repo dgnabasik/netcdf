@@ -835,13 +835,15 @@ func ShowLastExternalBackup() string {
 // This is the only function that calls iotdb. use xsv tool to output csv file of column types:
 // xsv stats /home/david/Documents/digital-twins/opsd.household/household_data_1min_singleindex.csv --everything >/home/david/Documents/digital-twins/opsd.household/summary_household_data_1min_singleindex.csv
 func LoadCsvSensorDataIntoDatabase(programArgs []string) {
-	ok, iotdbConnection := Init_IoTDB()
-	if !ok {
-		log.Fatal(errors.New(iotdbConnection))
+	createIotSession := !(len(programArgs) == 3 && programArgs[2] == timeSeriesCommands[0]) // example
+	if createIotSession {
+		ok, iotdbConnection := Init_IoTDB(createIotSession)
+		if !ok {
+			log.Fatal(errors.New(iotdbConnection))
+		}
 	}
-	iotdbDataFile, err := Initialize_IoTDbDataFile(programArgs)
+	iotdbDataFile, err := Initialize_IoTDbDataFile(createIotSession, programArgs)
 	checkErr("Initialize_IoTDbDataFile: ", err)
-	//fmt.Println(iotdbDataFile.OutputDescription(true))
 	err = iotdbDataFile.ProcessTimeseries()
 	checkErr("ProcessTimeseries(csv)", err)
 }
@@ -1743,7 +1745,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	return `???`
 }
 
-var timeSeriesCommands = []string{"drop", "create", "delete", "insert", "example"}
+var timeSeriesCommands = []string{"example", "drop", "create", "delete", "insert"}
 var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
 var iotdbParameters IoTDbProgramParameters
 
@@ -1847,12 +1849,12 @@ func configureIotdbAccess() *client.Config {
 	return config
 }
 
-func Init_IoTDB() (bool, string) {
+func Init_IoTDB(testIotdbAccess bool) (bool, string) {
 	fmt.Println("Initializing IoTDB client...")
 	clientConfig = configureIotdbAccess()
 	isOpen, err := testRemoteAddressPortsOpen(clientConfig.Host, []string{clientConfig.Port})
 	connectStr := clientConfig.Host + ":" + clientConfig.Port
-	if !isOpen {
+	if testIotdbAccess && !isOpen {
 		fmt.Printf("%s%v%s", "Expected IoTDB to be available at "+connectStr+" but got ERROR: ", err, "\n")
 		fmt.Printf("Please execute:  cd ~/iotdb && sbin/start-standalone.sh && sbin/start-cli.sh -h 127.0.0.1 -p 6667 -u root -pw root")
 		return false, connectStr
@@ -1862,6 +1864,7 @@ func Init_IoTDB() (bool, string) {
 
 type IoTDbDataFile struct {
 	session            client.Session             // for (iot *IoTDbDataFile) methods.
+	activeSession      bool                       // example command does not need IoTDB access.
 	Description        string                     `json:"description"`
 	DataFilePath       string                     `json:"datafilepath"`
 	DataFileType       string                     `json:"datafiletype"`
@@ -1873,11 +1876,11 @@ type IoTDbDataFile struct {
 	Dataset            [][]string                 `json:"dataset"`            // actual data
 }
 
-func Initialize_IoTDbDataFile(programArgs []string) (IoTDbDataFile, error) {
+func Initialize_IoTDbDataFile(isActive bool, programArgs []string) (IoTDbDataFile, error) {
 	datasetPathName := filepath.Base(programArgs[1]) // does not include trailing slash
 	datasetName := datasetPathName[:len(datasetPathName)-len(filepath.Ext(datasetPathName))]
 	description, _ := fs.ReadTextLines(filepath.Dir(programArgs[1])+"/description.txt", false)
-	iotdbDataFile := IoTDbDataFile{Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
+	iotdbDataFile := IoTDbDataFile{activeSession: isActive, Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
 	exists, err := fs.FileExists(iotdbDataFile.DataFilePath)
 	if !exists {
 		return iotdbDataFile, err
@@ -2330,11 +2333,13 @@ func (iot *IoTDbDataFile) Format_Ontology() []string {
 // create timeseries root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
 // ProcessTimeseries() is the only place where iot.session is instantiated and clientConfig is used.
 func (iot *IoTDbDataFile) ProcessTimeseries() error {
-	iot.session = client.NewSession(clientConfig)
-	if err := iot.session.Open(false, 0); err != nil {
-		log.Fatal(err)
+	if iot.activeSession {
+		iot.session = client.NewSession(clientConfig)
+		if err := iot.session.Open(false, 0); err != nil {
+			log.Fatal(err)
+		}
+		defer iot.session.Close()
 	}
-	defer iot.session.Close()
 	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
 
 	for _, command := range iot.TimeseriesCommands {
@@ -2414,12 +2419,12 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 			}
 			fmt.Println()
 
-		case "example": // output saref ttl class file:
+		case "example": // serialize saref class file:
 			ttlLines := iot.Format_Ontology()
-			//saref4data/v1.0.1
-			err := fs.WriteTextLines(ttlLines, iot.DataFilePath+".ttl", false)
-			fmt.Println("Wrote to " + iot.DataFilePath + ".ttl")
-			checkErr("WriteTextLines(ttl.output", err)
+			outputPath := iot.DataFilePath[:len(iot.DataFilePath)-len(filepath.Ext(iot.DataFilePath))] + serializationExtension
+			err := fs.WriteTextLines(ttlLines, outputPath, false)
+			fmt.Println("Wrote to " + outputPath)
+			checkErr("WriteTextLines(example)", err)
 
 		} // switch
 		fmt.Println("Timeseries " + command + " completed.")
