@@ -46,6 +46,8 @@ import (
 
 	"github.com/apache/iotdb-client-go/client"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	//"github.com/dgnabasik/netcdf/graphdb"
 	//"github.com/dgnabasik/netcdf/iotdb"
 )
@@ -53,15 +55,17 @@ import (
 const ( // these do not include trailing >
 	CurrentVersion         = "v1.0.1/"
 	SarefExtension         = "saref4data/"
+	s4data                 = "s4data :"
 	SarefEtsiOrg           = "https://saref.etsi.org/"
 	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
 	IotDataPrefix          = "root.datasets.etsi."
-	serializationExtension = ".trig" // https://en.wikipedia.org/wiki/TriG_(syntax)
+	serializationExtension = ".ttl" //trig<<< https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	jsonExtension          = ".json"
+	crlf                   = "\n"
 )
 
-var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
+var xsdDatatypeMap = map[string]string{"string": "string", "integer": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
@@ -100,7 +104,7 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 
 // mapped to original column name
 type MeasurementItem struct {
-	MeasurementName  string `json:"measurementname"`  // Original name always single-quoted
+	MeasurementName  string `json:"measurementname"`  // Original name
 	MeasurementAlias string `json:"measurementalias"` // Names that fit IotDB format; see MeasurementName() => [0-9 a-z A-Z _ ]
 	MeasurementType  string `json:"measurementtype"`  // XSD data type
 	MeasurementUnits string `json:"measurementunits"`
@@ -113,7 +117,7 @@ func (mi MeasurementItem) ToString() string {
 
 // General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs. Why not simply make these queries?
 type DataStatistic struct {
-	MeasurementName   string         `json:"standardname"`
+	MeasurementName   string         `json:"measurementname"`
 	NumberOfValues    int            `json:"numberofvalues"`
 	NumDistinctValues int            `json:"numdistinctvalues"`
 	MinimumValue      string         `json:"minimumvalue"`
@@ -349,16 +353,9 @@ func (cdf NetCDF) Format_SparqlQuery() []string {
 	return output
 }
 
-// Make the dataset its own Class and loadable into GraphDB as Named Graph. Produce specific DatatypeProperty ontology from dataset.
-// Special handling: "dateTime", "XMLLiteral", "anyURI". Problem: classic Turtle does not support named graphs. Must output in TRiG format.
-func (cdf NetCDF) Format_Ontology() []string {
-	const crlf = "\n"
-	identifier := cdf.Identifier
-	title := cdf.Title
-	description := cdf.Description
-	// also cdf.Variables
-	baseline := `@prefix s4data: <` + DataSetPrefix + `> .` + crlf +
-		`@prefix ex: <` + DataSetPrefix + identifier + `/> .` + crlf +
+func getBaselineOntology(identifier, title, description string) string {
+	return `@prefix ` + s4data + ` <` + DataSetPrefix + `> .` + crlf +
+		`@prefix ex: <` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
 		`@prefix foaf: <http://xmlns.com/foaf/spec/#> .` + crlf +
 		`@prefix geosp: <http://www.opengis.net/ont/geosparql#> .` + crlf +
 		`@prefix obo: <http://purl.obolibrary.org/obo/> .` + crlf +
@@ -388,7 +385,7 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
-		crlf +
+		crlf + crlf +
 		// extension class declarations for domains, ranges, rdfs:isDefinedBy
 		`###  ` + SarefEtsiOrg + `core/Time` + crlf +
 		`saref:Time rdf:type owl:Class .` + crlf +
@@ -413,40 +410,40 @@ func (cdf NetCDF) Format_Ontology() []string {
 		crlf +
 		// new common Classes
 		`###  ` + SarefEtsiOrg + SarefExtension + `StartTimeseries` + crlf +
-		`s4data:StartTimeseries rdf:type owl:Class ;` + crlf +
+		`` + s4data + `StartTimeseries rdf:type owl:Class ;` + crlf +
 		` rdfs:comment "The start time of a timeseries shall be present."@en ;` + crlf +
 		` rdfs:label "start timeseries"@en ;` + crlf +
 		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `StopTimeseries` + crlf +
-		`s4data:StopTimeseries rdf:type owl:Class ;` + crlf +
+		`` + s4data + `StopTimeseries rdf:type owl:Class ;` + crlf +
 		` rdfs:comment "The stop time of a timeseries shall be present."@en ;` + crlf +
 		` rdfs:label "stop timeseries"@en ;` + crlf +
 		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
 		crlf +
 		// new common ObjectProperty
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasEquation` + crlf +
-		`s4data:hasEquation rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `hasEquation rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:comment "A relationship indicating that the entire timeseries dataset is represented by a type of equation such as {linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential}."@en ;` + crlf +
 		` rdfs:label "has equation"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasDistribution` + crlf +
-		`s4data:hasDistribution rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `hasDistribution rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:comment "A relationship indicating that the entire timeseries dataset is accurately represented by a type of discrete or continuous distribution such as {Uniform, Bernoulli, Binomial, Poisson; Normal, Student_t_test, Exponential, Gamma, Weibull}."@en ;` + crlf +
 		` rdfs:label "has distribution"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isPriorTo` + crlf +
-		`s4data:isPriorTo rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `isPriorTo rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian prior to another dataset."@en ;` + crlf +
 		` rdfs:label "is Bayesian prior to "@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isPosteriorTo` + crlf +
-		`s4data:isPosteriorTo rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `isPosteriorTo rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian posterior to another dataset."@en ;` + crlf +
 		` rdfs:label "is Bayesian posterior to "@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isComparableTo` + crlf +
-		`s4data:isComparableTo rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `isComparableTo rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:comment "A relationship indicating that the timeseries dataset can be logically compared to another dataset. Necessary condition: type of Units and type of Distribution must agree. Sufficient condition: type of Equation must agree."@en ;` + crlf +
 		` rdfs:label "is comparable to "@en .` + crlf +
 		crlf +
@@ -460,62 +457,62 @@ func (cdf NetCDF) Format_Ontology() []string {
 		crlf +
 		// new common DatatypeProperty
 		`###  ` + SarefEtsiOrg + SarefExtension + `isAlignedWithTimeseries` + crlf +
-		`s4data:isAlignedWithTimeseries rdf:type owl:DatatypeProperty ;` + crlf +
+		`` + s4data + `isAlignedWithTimeseries rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:string ;` + crlf +
 		` rdfs:comment "The name of the time sequence that the timeseries is aligned with."@en ;` + crlf +
 		` rdfs:label "is aligned with timeseries"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasSamplingPeriodValue` + crlf +
-		`s4data:hasSamplingPeriodValue rdf:type owl:DatatypeProperty ;` + crlf +
+		`` + s4data + `hasSamplingPeriodValue rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:float ;` + crlf +
 		` rdfs:comment "The sampling period in seconds."@en ;` + crlf +
 		` rdfs:label "has samplingP period value"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasUpperLimitValue` + crlf +
-		`s4data:hasUpperLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
+		`` + s4data + `hasUpperLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:float ;` + crlf +
 		` rdfs:comment "The highest value in the timeseries."@en ;` + crlf +
 		` rdfs:label "has upper limit value"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasLowerLimitValue` + crlf +
-		`s4data:hasLowerLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
+		`` + s4data + `hasLowerLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:float ;` + crlf +
 		` rdfs:comment "The lowest value in the timeseries."@en ;` + crlf +
 		` rdfs:label "has lower limit value"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasNumericPrecision` + crlf +
-		`s4data:hasNumericPrecision rdf:type owl:DatatypeProperty ;` + crlf +
+		`` + s4data + `hasNumericPrecision rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:integer ;` + crlf +
 		` rdfs:comment "Indicates the number of trailing significant digits in the measurement."@en ;` + crlf +
 		` rdfs:label "has numeric precision"@en .` + crlf +
 		crlf +
 		// non-core DatatypeProperty extension references:
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasFrequencyMeasurement` + crlf + // s4envi
-		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
+		`` + s4data + `hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:isDefinedBy <` + SarefEtsiOrg + `saref4envi/hasFrequencyMeasurement> ;` + crlf +
 		` rdfs:comment "The relation between a device and the frequency in which it makes measurements."@en ;` + crlf +
 		` rdfs:label "has frequency measurement"@en .` + crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasConfidence` + crlf + // s4auto
 		crlf +
-		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
+		`###  ` + SarefEtsiOrg + SarefExtension + `hasConfidence` + crlf + // s4auto
+		`` + s4data + `hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
 		` rdfs:isDefinedBy <` + SarefEtsiOrg + `saref4auto/hasConfidence> ;` + crlf +
 		` rdfs:comment "A relation between an estimated measurement (saref:Measurement class) and its confidence (s4auto:Confidence)"@en ;` + crlf +
 		` rdfs:label "has confidence"@en .` + crlf +
 		crlf +
 		// define the dataset Class derived from various saref Classes but NOT s4ehaw:TimeSeriesMeasurement because that demands rdf:Seq or rdf:List.
 		`### ` + DataSetPrefix + identifier + crlf +
-		`s4data:` + identifier + ` rdf:type owl:Class ;` + crlf +
+		`` + s4data + `` + identifier + ` rdf:type owl:Class ;` + crlf +
 		` rdfs:subClassOf saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ,` + crlf +
 		// common Measurement properties;
 		` [` + crlf +
 		`  rdf:type owl:Restriction ;` + crlf +
 		`  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onClass s4data:StartTimeseries ;` + crlf +
+		`  owl:onClass ` + s4data + `StartTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		` ] ,` + crlf +
 		` [ rdf:type owl:Restriction ;` + crlf +
 		`  owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onClass s4data:EndTimeseries ;` + crlf +
+		`  owl:onClass ` + s4data + `EndTimeseries ;` + crlf +
 		`  owl:onProperty saref:hasTime ;` + crlf +
 		` ] ,` + crlf +
 		// core Measurement properties
@@ -562,21 +559,26 @@ func (cdf NetCDF) Format_Ontology() []string {
 		`  owl:onProperty s4auto:hasConfidence ;` + crlf +
 		`  owl:someValuesFrom s4auto:Confidence` + crlf +
 		` ] ,` + crlf + crlf
+}
 
+// Make the dataset its own Class and loadable into GraphDB as Named Graph. Produce specific DatatypeProperty ontology from dataset.
+// Special handling: "dateTime", "XMLLiteral", "anyURI". Problem: classic Turtle does not support named graphs. Must output in TRiG format.
+func (cdf NetCDF) Format_Ontology() []string {
+	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
 	output := strings.Split(baseline, crlf)
 	// add specific field names as DatatypeProperties: eva, _ := GetClosestEntity(identifier)  ` rdfs:subClassOf ` + eva.ParentClassIRI() + ` ,` + crlf +
 	for ndx, v := range cdf.Variables {
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty s4data:has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
-		if ndx < len(cdf.Variables)-1 {
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
+		if ndx < len(cdf.Variables) {
 			str += `] , ` + crlf
 		} else {
 			str += `] ; ` + crlf
 		}
 		output = append(output, str)
 	}
-	output = append(output, ` rdfs:comment "`+description+`"@en ;`+crlf)
-	output = append(output, ` rdfs:label "`+identifier+`"@en .`+crlf)
-
+	output = append(output, ` rdfs:comment "`+cdf.Description+`"@en ;`)
+	output = append(output, ` rdfs:label "`+cdf.Identifier+`"@en .`+crlf+crlf)
+	//<<<< append NamedIndividuals <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
 	return output
 }
 
@@ -667,7 +669,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			}
 			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
 			standardname := strings.Split(tokens[1], "(")[0]
-			tmpVar := MeasurementVariable{} // REFACTOR(test)
+			tmpVar := MeasurementVariable{}
 			tmpVar.MeasurementItem.MeasurementName = standardname
 			tmpVar.MeasurementItem.MeasurementAlias = standardname
 			tmpVar.MeasurementItem.MeasurementType = tokens[0]
@@ -916,9 +918,9 @@ func main() {
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 const (
-	sarefConst      = "saref:"
-	owlClass        = "owl:Class"
-	subClassOfmatch = "rdfs:subClassOf"
+	//sarefConst      = "saref:"
+	//owlClass        = "owl:Class"
+	//subClassOfmatch = "rdfs:subClassOf"
 	//etsiOrg         = "` + SarefEtsiOrg + `"
 	unknown        = "???"
 	zero           = 0.0
@@ -1909,7 +1911,6 @@ func Initialize_IoTDbDataFile(isActive bool, programArgs []string) (IoTDbDataFil
 
 // Include percentage of missing data, which can be got from a SELECT count(*) from root.datasets.etsi.household_data_1min_singleindex;
 func (iot *IoTDbDataFile) OutputDescription(displayColumnInfo bool) string {
-	const crlf = "\n"
 	var sb strings.Builder
 	sb.WriteString(crlf)
 	sb.WriteString("Description     : " + iot.Description + crlf)
@@ -1945,9 +1946,9 @@ func (iot *IoTDbDataFile) ReadCsvFile(filePath string, isDataset bool) {
 // Return quoted name and its alias. Alias: open brackets are replaced with underscore.
 // Need to handle 2 aliases being the same.  Handles some IotDB reserved keywords.
 func StandardName(oldName string) (string, string) { // return MeasurementName, MeasurementAlias
-	newName := oldName
+	newName := cases.Title(language.Und, cases.NoLower).String(oldName) // capitalize first letter
 	if strings.ToLower(newName) == "time" {
-		newName = "time1"
+		newName = "Time1"
 	}
 	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
 	alias := strings.ReplaceAll(newName, " ", "")
@@ -2100,232 +2101,23 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
 // Make the dataset its own Class and loadable into GraphDB as Named Graph. Special handling: "dateTime", "XMLLiteral", "anyURI"
 func (iot *IoTDbDataFile) Format_Ontology() []string {
-	const crlf = "\n"
-	identifier := iot.DatasetName
-	title := iot.DatasetName
-	description := iot.Description
-	baseline := `@prefix s4data: <` + DataSetPrefix + `> .` + crlf +
-		`@prefix ex: <` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
-		`@prefix foaf: <http://xmlns.com/foaf/spec/#> .` + crlf +
-		`@prefix geosp: <http://www.opengis.net/ont/geosparql#> .` + crlf +
-		`@prefix obo: <http://purl.obolibrary.org/obo/> .` + crlf +
-		`@prefix org: <https://schema.org/> .` + crlf +
-		`@prefix owl: <http://www.w3.org/2002/07/owl#> .` + crlf +
-		`@prefix org: <https://schema.org/> .` + crlf +
-		`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .` + crlf +
-		`@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .` + crlf +
-		`@prefix saref: <` + SarefEtsiOrg + `core/> .` + crlf +
-		// include all referenced extensions here without the version nnumber:
-		`@prefix s4ehaw: <` + SarefEtsiOrg + `saref4ehaw/> .` + crlf +
-		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
-		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
-		`@prefix ssn: <http://www.w3.org/ns/ssn/> .` + crlf +
-		`@prefix time: <http://www.w3.org/2006/time#> .` + crlf +
-		`@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .` + crlf +
-		`@prefix dcterms: <http://purl.org/dc/terms/> .` + crlf +
-		`@prefix dctype: <http://purl.org/dc/dcmitype/> .` + crlf +
-		`<` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> rdf:type owl:Ontology ;` + crlf +
-		`    owl:versionInfo "v3.1.1" ;` + crlf +
-		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
-		`dcterms:title "` + title + `"@en ;` + crlf +
-		`dcterms:description "` + description + `"@en ;` + crlf +
-		`dcterms:license <https://forge.etsi.org/etsi-software-license> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf + // include every referenced extension!
-		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
-		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
-		crlf +
-		// extension class declarations for domains, ranges, rdfs:isDefinedBy
-		`###  ` + SarefEtsiOrg + `core/Time` + crlf +
-		`saref:Time rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `core/UnitOfMeasure` + crlf +
-		`saref:UnitOfMeasure rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4ehaw/MeasurementFunction` + crlf +
-		`s4ehaw:MeasurementFunction rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4ehaw/Data` + crlf +
-		`s4ehaw:Data rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4envi/FrequencyUnit` + crlf +
-		`s4envi:FrequencyUnit rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4envi/FrequencyMeasurement` + crlf +
-		`s4envi:FrequencyMeasurement rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4auto/Confidence` + crlf +
-		`s4auto:Confidence rdf:type owl:Class .` + crlf +
-		crlf +
-		// new common Classes
-		`###  ` + SarefEtsiOrg + SarefExtension + `StartTimeseries` + crlf +
-		`s4data:StartTimeseries rdf:type owl:Class ;` + crlf +
-		` rdfs:comment "The start time of a timeseries shall be present."@en ;` + crlf +
-		` rdfs:label "start timeseries"@en ;` + crlf +
-		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `StopTimeseries` + crlf +
-		`s4data:StopTimeseries rdf:type owl:Class ;` + crlf +
-		` rdfs:comment "The stop time of a timeseries shall be present."@en ;` + crlf +
-		` rdfs:label "stop timeseries"@en ;` + crlf +
-		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
-		crlf +
-		// new common ObjectProperty
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasEquation` + crlf +
-		`s4data:hasEquation rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the entire timeseries dataset is represented by a type of equation such as {linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential}."@en ;` + crlf +
-		` rdfs:label "has equation"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasDistribution` + crlf +
-		`s4data:hasDistribution rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the entire timeseries dataset is accurately represented by a type of discrete or continuous distribution such as {Uniform, Bernoulli, Binomial, Poisson; Normal, Student_t_test, Exponential, Gamma, Weibull}."@en ;` + crlf +
-		` rdfs:label "has distribution"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `isPriorTo` + crlf +
-		`s4data:isPriorTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian prior to another dataset."@en ;` + crlf +
-		` rdfs:label "is Bayesian prior to "@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `isPosteriorTo` + crlf +
-		`s4data:isPosteriorTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian posterior to another dataset."@en ;` + crlf +
-		` rdfs:label "is Bayesian posterior to "@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `isComparableTo` + crlf +
-		`s4data:isComparableTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset can be logically compared to another dataset. Necessary condition: type of Units and type of Distribution must agree. Sufficient condition: type of Equation must agree."@en ;` + crlf +
-		` rdfs:label "is comparable to "@en .` + crlf +
-		crlf +
-		// non-core ObjectProperty extension references:
-		`###  ` + SarefEtsiOrg + `saref4ehaw/hasTimeSeriesMeasurement` + crlf + // s4ehaw:
-		`s4ehaw:hasTimeSeriesMeasurement rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:domain s4ehaw:Data ;` + crlf +
-		` rdfs:range s4ehaw:TimeseriesMeasurement ;` + crlf +
-		` rdfs:comment "Data has time series measurements, a sequence taken at successive equally spaced points in time."@en ;` + crlf +
-		` rdfs:label "has time series measurement"@en .` + crlf +
-		crlf +
-		// new common DatatypeProperty
-		`###  ` + SarefEtsiOrg + SarefExtension + `isAlignedWithTimeseries` + crlf +
-		`s4data:isAlignedWithTimeseries rdf:type owl:DatatypeProperty ;` + crlf +
-		` rdfs:range xsd:string ;` + crlf +
-		` rdfs:comment "The name of the time sequence that the timeseries is aligned with."@en ;` + crlf +
-		` rdfs:label "is aligned with timeseries"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasSamplingPeriodValue` + crlf +
-		`s4data:hasSamplingPeriodValue rdf:type owl:DatatypeProperty ;` + crlf +
-		` rdfs:range xsd:float ;` + crlf +
-		` rdfs:comment "The sampling period in seconds."@en ;` + crlf +
-		` rdfs:label "has samplingP period value"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasUpperLimitValue` + crlf +
-		`s4data:hasUpperLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
-		` rdfs:range xsd:float ;` + crlf +
-		` rdfs:comment "The highest value in the timeseries."@en ;` + crlf +
-		` rdfs:label "has upper limit value"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasLowerLimitValue` + crlf +
-		`s4data:hasLowerLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
-		` rdfs:range xsd:float ;` + crlf +
-		` rdfs:comment "The lowest value in the timeseries."@en ;` + crlf +
-		` rdfs:label "has lower limit value"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasNumericPrecision` + crlf +
-		`s4data:hasNumericPrecision rdf:type owl:DatatypeProperty ;` + crlf +
-		` rdfs:range xsd:integer ;` + crlf +
-		` rdfs:comment "Indicates the number of trailing significant digits in the measurement."@en ;` + crlf +
-		` rdfs:label "has numeric precision"@en .` + crlf +
-		crlf +
-		// non-core DatatypeProperty extension references:
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasFrequencyMeasurement` + crlf + // s4envi
-		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:isDefinedBy <` + SarefEtsiOrg + `saref4envi/hasFrequencyMeasurement> ;` + crlf +
-		` rdfs:comment "The relation between a device and the frequency in which it makes measurements."@en ;` + crlf +
-		` rdfs:label "has frequency measurement"@en .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + SarefExtension + `hasConfidence` + crlf + // s4auto
-		`s4data:hasFrequencyMeasurement rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:isDefinedBy <` + SarefEtsiOrg + `saref4auto/hasConfidence> ;` + crlf +
-		` rdfs:comment "A relation between an estimated measurement (saref:Measurement class) and its confidence (s4auto:Confidence)"@en ;` + crlf +
-		` rdfs:label "has confidence"@en .` + crlf +
-		crlf +
-		// define the dataset Class derived from various saref Classes but NOT s4ehaw:TimeSeriesMeasurement because that demands rdf:Seq or rdf:List.
-		`### ` + DataSetPrefix + identifier + crlf +
-		`s4data:` + identifier + ` rdf:type owl:Class ;` + crlf +
-		` rdfs:subClassOf saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ,` + crlf +
-		// common Measurement properties;
-		` [` + crlf +
-		`  rdf:type owl:Restriction ;` + crlf +
-		`  owl:minQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onClass s4data:StartTimeseries ;` + crlf +
-		`  owl:onProperty saref:hasTime ;` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onClass s4data:EndTimeseries ;` + crlf +
-		`  owl:onProperty saref:hasTime ;` + crlf +
-		` ] ,` + crlf +
-		// core Measurement properties
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:hasTime ;` + crlf +
-		`  owl:allValuesFrom saref:Time` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:hasMeasurement ;` + crlf +
-		`  owl:allValuesFrom saref:Measurement ` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:relatesToMeasurement ;` + crlf +
-		`  owl:allValuesFrom saref:Measurement` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:measurementMadeBy ;` + crlf +
-		`  owl:someValuesFrom saref:Device` + crlf +
-		` ] ,` + crlf +
-		` [ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:isMeasuredIn ;` + crlf +
-		`  owl:allValuesFrom saref:UnitOfMeasure` + crlf +
-		`] ,` + crlf +
-		`[ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:relatesToProperty ;` + crlf +
-		`  owl:allValuesFrom saref:Property` + crlf +
-		`] ,` + crlf +
-		`[ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:isMeasuredIn ;` + crlf +
-		`  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onClass saref:UnitOfMeasure:` + crlf +
-		`] ,` + crlf +
-		`[ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:hasTimestamp ;` + crlf +
-		`  owl:allValuesFrom xsd:dateTime` + crlf +
-		`] ,` + crlf +
-		`[ rdf:type owl:Restriction ;` + crlf +
-		`  owl:onProperty saref:hasValue ;` + crlf +
-		`  owl:qualifiedCardinality "1"^^xsd:nonNegativeInteger ;` + crlf +
-		`  owl:onDataRange xsd:float` + crlf +
-		` ] ,` + crlf +
-		// extension Measurement properties
-		` [ rdf:type owl:Restriction ;` + crlf + // s4auto
-		`  owl:onProperty s4auto:hasConfidence ;` + crlf +
-		`  owl:someValuesFrom s4auto:Confidence` + crlf +
-		` ] ,` + crlf
-
+	baseline := getBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description)
 	output := strings.Split(baseline, crlf)
-	// add specific field names as DatatypeProperties: this section is different from the one in cdf.Format_Ontology().
-	ndx := 0
+	// add specific field names as DatatypeProperties:
+	ndx := 0 // can't use ndx in range because the map is indexed by a string.
 	for _, v := range iot.Measurements {
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty s4data:has` + v.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementType] + crlf
-		if ndx < len(iot.Measurements)-1 {
+		ndx++
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementType] + crlf
+		if ndx < len(iot.Measurements) {
 			str += `] , ` + crlf
 		} else {
 			str += `] ; ` + crlf
 		}
-		ndx++
 		output = append(output, str)
 	}
-	output = append(output, ` rdfs:comment "`+description+`"@en ;`+crlf)
-	output = append(output, ` rdfs:label "`+identifier+`"@en .`+crlf)
-
+	output = append(output, ` rdfs:comment "`+iot.Description+`"@en ;`)
+	output = append(output, ` rdfs:label "`+iot.DatasetName+`"@en .`+crlf+crlf)
+	//<<<< append NamedIndividuals <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#NamedIndividual"/>
 	return output
 }
 
@@ -2394,7 +2186,7 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 					sb.Reset()
 					startTime, err := getStartTime(iot.Dataset[r][0])
 					if err != nil {
-						fmt.Println(iot.Dataset[r][0]) //<<< Integer type not picked up.
+						fmt.Println(iot.Dataset[r][0])
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
