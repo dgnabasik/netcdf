@@ -54,7 +54,7 @@ import (
 )
 
 const ( // these do not include trailing >
-	HomeDirectory          = "/home/david" // davidgnabasik
+	HomeDirectory          = "/home/david/" // davidgnabasik
 	CurrentVersion         = "v1.0.1/"
 	SarefExtension         = "saref4data/"
 	s4data                 = "s4data:"
@@ -64,6 +64,7 @@ const ( // these do not include trailing >
 	serializationExtension = ".ttl" //trig<<< Classic Turtle does not support named graphs. Must output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	jsonExtension          = ".json"
+	csvExtension           = ".csv"
 	crlf                   = "\n"
 )
 
@@ -117,16 +118,6 @@ func (mi MeasurementItem) ToString() string {
 	return mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
 }
 
-// General data Statistics. Not stored in IotDB. <<<REFACTOR with xsv outputs. Why not simply make these queries?
-type DataStatistic struct {
-	MeasurementName   string         `json:"measurementname"`
-	NumberOfValues    int            `json:"numberofvalues"`
-	NumDistinctValues int            `json:"numdistinctvalues"`
-	MinimumValue      string         `json:"minimumvalue"`
-	MaximumValue      string         `json:"maximumvalue"`
-	FrequencyMap      map[string]int `json:"frequencymap"`
-}
-
 // Expects the parameters to every Variable to be all the (2) dimensions (except for the dimension variables).
 type MeasurementVariable struct {
 	MeasurementItem `json:"measurementitem"`
@@ -143,10 +134,6 @@ type NetCDF struct {
 	Dimensions       map[string]int        `json:"dimensions"`
 	Title            string                `json:"title"`
 	Description      string                `json:"description"`
-	DataFilePath     string                `json:"datafilepath"`
-	DataFileType     string                `json:"datafiletype"`
-	SummaryFilePath  string                `json:"summaryfilepath"`
-	DatasetName      string                `json:"datasetname"`
 	Conventions      string                `json:"conventions"`
 	Institution      string                `json:"institution"`
 	Code_url         string                `json:"code_url"`
@@ -154,16 +141,23 @@ type NetCDF struct {
 	Datastream_name  string                `json:"datastream_name"`
 	Input_files      string                `json:"input_files"`
 	History          string                `json:"history"`
-	Variables        []MeasurementVariable `json:"variables"`
+	Variables        []MeasurementVariable `json:"variables"`       //<<<< change to Measurements       map[string]MeasurementItem `json:"measurements"`
 	HouseIndices     []string              `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
 	LongtimeIndices  []string              `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
-	Summary          [][]string            `json:"summary"`         // from summary file
-	//Dataset          [][]string            `json:"dataset"`         // actual data
+	// these are not in the source file.
+	DataFilePath    string     `json:"datafilepath"`
+	DataFileType    string     `json:"datafiletype"`
+	SummaryFilePath string     `json:"summaryfilepath"`
+	DatasetName     string     `json:"datasetname"`
+	Summary         [][]string `json:"summary"` // from summary file
+	Dataset         [][]string `json:"dataset"` // actual data
+	QueryResults    []string   `json:"queryresults"`
 }
 
 // Some variable names must be aliased in SQL statements: {time, }
 func (cdf NetCDF) StandardNameAlias(standardName string) string {
 	if standardName == "time" {
+		fmt.Println("longtime")
 		return "longtime"
 	}
 	return standardName
@@ -347,6 +341,352 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	}
 	return stats, true
 }
+
+// Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
+func (cdf NetCDF) Format_Ontology() []string {
+	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
+	output := strings.Split(baseline, crlf)
+	output = append(output, `### specific timeseries DatatypeProperties`)
+	for ndx, v := range cdf.Variables {
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
+		if ndx < len(cdf.Variables) {
+			str += `] ,`
+		} else {
+			str += `] ;`
+		}
+		output = append(output, str)
+	}
+
+	output = append(output, ` rdfs:comment "`+cdf.Description+`"@en ;`)
+	output = append(output, ` rdfs:label "`+cdf.Identifier+`"@en .`)
+
+	// append single NamedIndividual.
+	output = append(output, `### externel references`+crlf)
+	externStr := getExternalReferences()
+	output = append(output, strings.Split(externStr, crlf)...)
+
+	// new common Classes: StartTimeseries, StopTimeseries
+	uniqueID := GetUniqueInstanceID()
+	output = append(output, `### class instances`+crlf)
+	output = append(output, `ex:StartTimeseries`+uniqueID)
+	output = append(output, `rdf:type `+s4data+`StartTimeseries ;`)
+	output = append(output, `rdf:label "StartTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
+	output = append(output, `ex:StopTimeseries`+uniqueID)
+	output = append(output, `rdf:type `+s4data+`StopTimeseries ;`)
+	output = append(output, `rdf:label "StopTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
+	output = append(output, `### internel references`+crlf)
+
+	values, ok := cdf.GetSummaryStatValues("mean")
+	output = append(output, `<`+DataSetPrefix+cdf.Identifier+uniqueID+`> rdf:type owl:NamedIndividual , `)
+	output = append(output, `  saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ;`+crlf)
+
+	if ok {
+		for ndx := 0; ndx < len(cdf.Variables); ndx++ {
+			for _, v := range cdf.Variables { //
+				if v.ColumnOrder == ndx {
+					str := s4data + v.MeasurementName + `  "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[v.MeasurementType]
+					if v.ColumnOrder < len(cdf.Variables)-1 {
+						str += ` ;`
+					} else {
+						str += ` .`
+					}
+					output = append(output, str)
+					break
+				}
+			}
+		}
+	}
+
+	return output
+}
+
+// CSV output format is same as xsv output. Assigns cdf.Summary::[][]string and returns format suitable for file system.
+// summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "units"}
+func (cdf *NetCDF) OutputSummaryCsvFile() ([]string, error) {
+	xsdMap := map[string]string{"string": "Unicode", "float": "Float", "integer": "Integer", "double": "double"}
+	csvLines := make([]string, 0)
+	csvLines = append(csvLines, strings.Join(summaryColumnNames, ","))
+	for ndx := 0; ndx < len(cdf.Variables); ndx++ {
+		for _, v := range cdf.Variables { // <<<< add calculated fields.
+			if v.ColumnOrder == ndx {
+				str := v.MeasurementName + "," + xsdMap[v.MeasurementItem.MeasurementType]
+				switch v.MeasurementItem.MeasurementType {
+				case "string":
+					str += "unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,"
+				case "float":
+					str += "1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,"
+				case "integer":
+					str += "1,1,1,1,1,1,1,1,1,1,"
+				}
+				str += v.MeasurementItem.MeasurementUnits
+				csvLines = append(csvLines, str)
+				break
+			}
+		}
+	}
+	csvLines = append(csvLines, "\\")
+	return csvLines, nil
+}
+
+// Expects comma-separated files. Assigns Dataset or Summary. REFACTOR
+func (cdf *NetCDF) ReadCsvFile(filePath string, isDataset bool) {
+	f, err := os.Open(filePath)
+	checkErr("Unable to read csv file: ", err)
+	defer f.Close()
+	fmt.Println("Reading " + filePath)
+	csvReader := csv.NewReader(f)
+	if !isDataset {
+		cdf.Summary, err = csvReader.ReadAll()
+	} else {
+		cdf.Dataset, err = csvReader.ReadAll()
+	}
+	checkErr("Unable to parse file as CSV for "+filePath, err)
+}
+
+// Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
+// len() only returns the length of the "external" array.
+func (cdf *NetCDF) XsvSummaryTypeMap() {
+	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer"}
+	cdf.Measurements = make(map[string]MeasurementItem, 0)
+	// get units column
+	unitsColumn := 0
+	for ndx := 0; ndx < len(cdf.Summary[0]); ndx++ { // iterate over summary header row
+		if strings.ToLower(cdf.Summary[0][ndx]) == "units" {
+			unitsColumn = ndx
+			break
+		}
+	}
+	ndx1 := 0
+	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
+		if cdf.Summary[ndx+1][0] == "interpolated" || len(cdf.Summary[ndx+1][0]) < 2 {
+			ndx1 = ndx
+			break
+		}
+		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // skip header row
+		theEnd := dataColumnName == "interpolated"
+		if !theEnd {
+			mi := MeasurementItem{
+				MeasurementName:  dataColumnName,
+				MeasurementAlias: aliasName,
+				MeasurementType:  rowsXsdMap[cdf.Summary[ndx+1][1]],
+				MeasurementUnits: cdf.Summary[ndx+1][unitsColumn],
+				ColumnOrder:      ndx,
+			}
+			cdf.Measurements[dataColumnName] = mi // add to map using original name
+		}
+	}
+	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
+	mi := MeasurementItem{
+		MeasurementName:  LastColumnName,
+		MeasurementAlias: LastColumnName,
+		MeasurementType:  "string",
+		MeasurementUnits: "unicode,string",
+		ColumnOrder:      ndx1,
+	}
+	cdf.Measurements[LastColumnName] = mi
+}
+
+// Return NetCDF struct by parsing Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
+func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
+	netcdf := NetCDF{}
+	lines, err := fs.ReadTextLines(fname, false)
+	if err != nil {
+		fmt.Println(err)
+		return netcdf, err
+	}
+	netcdf.DataFilePath = fname
+	datasetPathName := filepath.Base(netcdf.DataFilePath) // does not include trailing slash
+	netcdf.DataFileType = strings.ToLower(path.Ext(netcdf.DataFilePath))
+	netcdf.SummaryFilePath = strings.Replace(netcdf.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
+	netcdf.DatasetName = identifier
+	lineIndex := 0
+	tokens := strings.Split(lines[lineIndex], " ")
+	netcdf.NetcdfType = filetype
+	netcdf.Identifier = tokens[1]
+	if len(identifier) > 0 {
+		netcdf.Identifier = identifier
+	}
+	netcdf.Dimensions = make(map[string]int, 0)
+	netcdf.Variables = make([]MeasurementVariable, 0)
+	lineIndex++
+
+	if strings.Contains(lines[lineIndex], "dimensions:") {
+		variables := strings.Contains(lines[lineIndex], "variables:")
+		for !variables {
+			lineIndex++
+			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
+			size, e := strconv.Atoi(tokens[2])
+			if e == nil {
+				netcdf.Dimensions[tokens[0]] = size
+			} else {
+				fmt.Println("Error converting Dimension " + tokens[0])
+			}
+			variables = strings.Contains(lines[lineIndex+1], "variables:")
+		}
+		lineIndex++
+	}
+
+	// Index each dimension
+	dimensionMap := make(map[string]int, len(netcdf.Dimensions))
+	index := 1
+	for k := range netcdf.Dimensions {
+		dimensionMap[k] = index
+		index++
+	}
+
+	if strings.Contains(lines[lineIndex], "variables:") {
+		columnIndex := 0
+		offset := 1
+		data := strings.Contains(lines[lineIndex], "data:")
+		for !data {
+			lineIndex++
+			if len(strings.TrimSpace(lines[lineIndex])) == 0 {
+				break
+			}
+			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
+			standardname := strings.TrimSpace(strings.Split(tokens[1], "(")[0]) //<<< StandardName
+			tmpVar := MeasurementVariable{}
+			tmpVar.MeasurementItem.MeasurementName = standardname
+			tmpVar.MeasurementItem.MeasurementAlias = standardname
+			tmpVar.MeasurementItem.MeasurementType = tokens[0]
+			val, ok := dimensionMap[tmpVar.MeasurementItem.MeasurementName]
+			if ok {
+				tmpVar.DimensionIndex = val
+			}
+			thisVariable := strings.Contains(lines[lineIndex], tmpVar.MeasurementItem.MeasurementName)
+			for thisVariable {
+				tmpVar.MeasurementItem.ColumnOrder = columnIndex
+				lineIndex++
+				tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), "=")
+				if strings.Contains(lines[lineIndex], ":units") {
+					tmpVar.MeasurementItem.MeasurementUnits = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":standard_name") {
+					tmpVar.MeasurementItem.MeasurementName = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":long_name") {
+					tmpVar.MeasurementItem.MeasurementAlias = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":_FillValue") {
+					tmpVar.FillValue = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":comment") {
+					tmpVar.Comment = prettifyString(tokens[offset])
+				}
+				if strings.Contains(lines[lineIndex], ":calendar") {
+					tmpVar.Calendar = prettifyString(tokens[offset])
+				}
+				thisVariable = strings.Contains(lines[lineIndex+1], tmpVar.MeasurementItem.MeasurementName+":")
+			}
+			if tmpVar.MeasurementItem.MeasurementName != "=" { // hack
+				netcdf.Variables = append(netcdf.Variables, tmpVar)
+				columnIndex++
+			}
+		}
+	}
+
+	lineIndex = lineIndex + 2
+	offset := 1
+	for lineIndex < len(lines) {
+		if strings.Contains(lines[lineIndex], "data:") {
+			break
+		}
+		tokens := strings.Split(lines[lineIndex], "\"")
+		if strings.Contains(lines[lineIndex], ":title") {
+			netcdf.Title = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":description") {
+			netcdf.Description = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":conventions") {
+			netcdf.Conventions = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":institution") {
+			netcdf.Institution = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":code_url") {
+			netcdf.Code_url = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":location_meaning") {
+			netcdf.Location_meaning = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":datastream_name") {
+			netcdf.Datastream_name = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":input_files") {
+			netcdf.Input_files = tokens[offset]
+		}
+		if strings.Contains(lines[lineIndex], ":history") {
+			netcdf.History = tokens[offset]
+		}
+		lineIndex++
+	}
+
+	lineIndex = lineIndex + 2
+	//netcdf.HouseIndices = make([]string, netcdf.Dimensions["id"])
+	//netcdf.LongtimeIndices = make([]string, netcdf.Dimensions["time"])
+	netcdf.HouseIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["id"], lineIndex, lines)
+	netcdf.LongtimeIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["time"], lineIndex, lines)
+	lineIndex++
+
+	/* dimIndex := 0
+	for lineIndex < len(lines) {
+		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
+			break
+		}
+		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
+		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
+			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
+		}
+		for ndx := 0; ndx < len(tokens)-1; ndx++ {
+			netcdf.HouseIndices[dimIndex] = prettifyString(tokens[ndx])
+			if strings.Contains(netcdf.HouseIndices[dimIndex], "=") { // remove variable names
+				tok2 := strings.Split(netcdf.HouseIndices[dimIndex], "=")
+				netcdf.HouseIndices[dimIndex] = tok2[1]
+			}
+			dimIndex++
+		}
+		lineIndex++
+	}
+
+	lineIndex++
+	dimIndex = 0
+	for lineIndex < len(lines) {
+		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
+			break
+		}
+		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
+		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
+			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
+		}
+		for ndx := 0; ndx < len(tokens)-1; ndx++ {
+			netcdf.LongtimeIndices[dimIndex] = prettifyString(tokens[ndx])
+			if strings.Contains(netcdf.LongtimeIndices[dimIndex], "=") { // remove variable names
+				tok2 := strings.Split(netcdf.LongtimeIndices[dimIndex], "=")
+				netcdf.LongtimeIndices[dimIndex] = tok2[1]
+			}
+			dimIndex++
+		}
+		lineIndex++
+	} */
+
+	netcdf.SummaryFilePath = strings.Replace(netcdf.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
+	summaryLines, err := netcdf.OutputSummaryCsvFile()
+	checkErr("OutputSummaryCsvFile: ", err)
+	outputPath := GetOutputPath(netcdf.DataFilePath, "")
+	err = fs.WriteTextLines(summaryLines, outputPath+csvExtension, false)
+	checkErr("fs.WriteTextLines(csv)", err)
+	err = UploadFile(DataSetPrefix+netcdf.DatasetName+csvExtension, summaryLines)
+	checkErr("UploadFile: "+DataSetPrefix+netcdf.DatasetName+csvExtension, err)
+	netcdf.ReadCsvFile(netcdf.SummaryFilePath, false) // isDataset: no, is summary
+	netcdf.XsvSummaryTypeMap()
+	//<<<< read sensor data
+	//netcdf.ReadCsvFile(netcdf.DataFilePath, true) // isDataset: yes
+
+	return netcdf, nil
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
 
 // Excluded "rdf:type owl:Restriction owl:onProperty saref:measurementMadeBy owl:someValuesFrom saref:Device" because don't know Device.
 func getBaselineOntology(identifier, title, description string) string {
@@ -571,65 +911,6 @@ func getExternalReferences() string {
 		`s4ehaw:hasTimeSeriesMeasurement a owl:ObjectProperty .` + crlf // this is the only external ObjectProperty
 }
 
-// Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
-func (cdf NetCDF) Format_Ontology() []string {
-	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
-	output := strings.Split(baseline, crlf)
-	output = append(output, `### specific timeseries DatatypeProperties`)
-	for ndx, v := range cdf.Variables {
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
-		if ndx < len(cdf.Variables) {
-			str += `] ,`
-		} else {
-			str += `] ;`
-		}
-		output = append(output, str)
-	}
-
-	output = append(output, ` rdfs:comment "`+cdf.Description+`"@en ;`)
-	output = append(output, ` rdfs:label "`+cdf.Identifier+`"@en .`)
-
-	// append single NamedIndividual.
-	output = append(output, `### externel references`+crlf)
-	externStr := getExternalReferences()
-	output = append(output, strings.Split(externStr, crlf)...)
-
-	// new common Classes: StartTimeseries, StopTimeseries
-	uniqueID := GetUniqueInstanceID()
-	output = append(output, `### class instances`+crlf)
-	output = append(output, `ex:StartTimeseries`+uniqueID)
-	output = append(output, `rdf:type `+s4data+`StartTimeseries ;`)
-	output = append(output, `rdf:label "StartTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `ex:StopTimeseries`+uniqueID)
-	output = append(output, `rdf:type `+s4data+`StopTimeseries ;`)
-	output = append(output, `rdf:label "StopTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `### internel references`+crlf)
-
-	values, ok := cdf.GetSummaryStatValues("mean")
-	output = append(output, `<`+DataSetPrefix+cdf.Identifier+uniqueID+`> rdf:type owl:NamedIndividual , `)
-	output = append(output, `  saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ;`+crlf)
-
-	if ok {
-		for ndx := 0; ndx < len(cdf.Variables); ndx++ {
-			for _, v := range cdf.Variables { //
-				if v.ColumnOrder == ndx {
-					str := s4data + v.MeasurementName + `  "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[v.MeasurementType]
-					if v.ColumnOrder < len(cdf.Variables)-1 {
-						str += ` ;`
-					} else {
-						str += ` .`
-					}
-					output = append(output, str)
-				}
-			}
-		}
-	}
-
-	return output
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
 // Expects nginx server running at http://localhost:80/datasets
 // Upload JSON descriptor files, turtle files, SPARQL query files.
 func UploadFile(destinationUrl string, lines []string) error {
@@ -637,6 +918,7 @@ func UploadFile(destinationUrl string, lines []string) error {
 	return nil
 }
 
+// Not used.
 func readJsonFileInto_NetCDF(filename string) (NetCDF, error) {
 	funcName := "readJsonFileInto_NetCDF"
 	file, err := os.Open(filename)
@@ -659,195 +941,6 @@ func prettifyString(str string) string {
 		s = s[0 : len(s)-1]
 	}
 	return s
-}
-
-// Return NetCDF struct by parsing Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
-func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
-	netcdf := NetCDF{}
-	lines, err := fs.ReadTextLines(fname, false)
-	if err != nil {
-		fmt.Println(err)
-		return netcdf, err
-	}
-	netcdf.DataFilePath = fname
-	datasetPathName := filepath.Base(netcdf.DataFilePath) // does not include trailing slash
-	netcdf.DataFileType = strings.ToLower(path.Ext(netcdf.DataFilePath))
-	netcdf.SummaryFilePath = strings.Replace(netcdf.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
-	netcdf.DatasetName = identifier
-	lineIndex := 0
-	tokens := strings.Split(lines[lineIndex], " ")
-	netcdf.NetcdfType = filetype
-	netcdf.Identifier = tokens[1]
-	if len(identifier) > 0 {
-		netcdf.Identifier = identifier
-	}
-	netcdf.Dimensions = make(map[string]int, 0)
-	netcdf.Variables = make([]MeasurementVariable, 0)
-	lineIndex++
-
-	if strings.Contains(lines[lineIndex], "dimensions:") {
-		variables := strings.Contains(lines[lineIndex], "variables:")
-		for !variables {
-			lineIndex++
-			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
-			size, e := strconv.Atoi(tokens[2])
-			if e == nil {
-				netcdf.Dimensions[tokens[0]] = size
-			} else {
-				fmt.Println("Error converting Dimension " + tokens[0])
-			}
-			variables = strings.Contains(lines[lineIndex+1], "variables:")
-		}
-		lineIndex++
-	}
-
-	// Index each dimension
-	dimensionMap := make(map[string]int, len(netcdf.Dimensions))
-	index := 1
-	for k := range netcdf.Dimensions {
-		dimensionMap[k] = index
-		index++
-	}
-
-	if strings.Contains(lines[lineIndex], "variables:") {
-		columnIndex := 0
-		offset := 1
-		data := strings.Contains(lines[lineIndex], "data:")
-		for !data {
-			lineIndex++
-			if len(strings.TrimSpace(lines[lineIndex])) == 0 {
-				break
-			}
-			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
-			standardname := strings.Split(tokens[1], "(")[0]
-			tmpVar := MeasurementVariable{}
-			tmpVar.MeasurementItem.MeasurementName = standardname
-			tmpVar.MeasurementItem.MeasurementAlias = standardname
-			tmpVar.MeasurementItem.MeasurementType = tokens[0]
-			val, ok := dimensionMap[tmpVar.MeasurementItem.MeasurementName]
-			if ok {
-				tmpVar.DimensionIndex = val
-			}
-			thisVariable := strings.Contains(lines[lineIndex], tmpVar.MeasurementItem.MeasurementName)
-			for thisVariable {
-				tmpVar.MeasurementItem.ColumnOrder = columnIndex
-				columnIndex++
-				lineIndex++
-				tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), "=")
-				if strings.Contains(lines[lineIndex], ":units") {
-					tmpVar.MeasurementItem.MeasurementUnits = prettifyString(tokens[offset])
-				}
-				if strings.Contains(lines[lineIndex], ":standard_name") {
-					tmpVar.MeasurementItem.MeasurementName = prettifyString(tokens[offset])
-				}
-				if strings.Contains(lines[lineIndex], ":long_name") {
-					tmpVar.MeasurementItem.MeasurementAlias = prettifyString(tokens[offset])
-				}
-				if strings.Contains(lines[lineIndex], ":_FillValue") {
-					tmpVar.FillValue = prettifyString(tokens[offset])
-				}
-				if strings.Contains(lines[lineIndex], ":comment") {
-					tmpVar.Comment = prettifyString(tokens[offset])
-				}
-				if strings.Contains(lines[lineIndex], ":calendar") {
-					tmpVar.Calendar = prettifyString(tokens[offset])
-				}
-				thisVariable = strings.Contains(lines[lineIndex+1], tmpVar.MeasurementItem.MeasurementName+":")
-			}
-			if tmpVar.MeasurementItem.MeasurementName != "=" { // hack
-				netcdf.Variables = append(netcdf.Variables, tmpVar)
-			}
-		}
-	}
-
-	lineIndex = lineIndex + 2
-	offset := 1
-	for lineIndex < len(lines) {
-		if strings.Contains(lines[lineIndex], "data:") {
-			break
-		}
-		tokens := strings.Split(lines[lineIndex], "\"")
-		if strings.Contains(lines[lineIndex], ":title") {
-			netcdf.Title = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":description") {
-			netcdf.Description = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":conventions") {
-			netcdf.Conventions = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":institution") {
-			netcdf.Institution = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":code_url") {
-			netcdf.Code_url = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":location_meaning") {
-			netcdf.Location_meaning = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":datastream_name") {
-			netcdf.Datastream_name = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":input_files") {
-			netcdf.Input_files = tokens[offset]
-		}
-		if strings.Contains(lines[lineIndex], ":history") {
-			netcdf.History = tokens[offset]
-		}
-		lineIndex++
-	}
-
-	lineIndex = lineIndex + 2
-	//netcdf.HouseIndices = make([]string, netcdf.Dimensions["id"])
-	//netcdf.LongtimeIndices = make([]string, netcdf.Dimensions["time"])
-	netcdf.HouseIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["id"], lineIndex, lines)
-	netcdf.LongtimeIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["time"], lineIndex, lines)
-	lineIndex++
-
-	/* dimIndex := 0
-	for lineIndex < len(lines) {
-		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
-			break
-		}
-		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
-		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
-			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
-		}
-		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			netcdf.HouseIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(netcdf.HouseIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(netcdf.HouseIndices[dimIndex], "=")
-				netcdf.HouseIndices[dimIndex] = tok2[1]
-			}
-			dimIndex++
-		}
-		lineIndex++
-	}
-
-	lineIndex++
-	dimIndex = 0
-	for lineIndex < len(lines) {
-		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
-			break
-		}
-		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
-		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
-			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
-		}
-		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			netcdf.LongtimeIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(netcdf.LongtimeIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(netcdf.LongtimeIndices[dimIndex], "=")
-				netcdf.LongtimeIndices[dimIndex] = tok2[1]
-			}
-			dimIndex++
-		}
-		lineIndex++
-	} */
-
-	//<<<< Assign Summary
-
-	return netcdf, nil
 }
 
 // Return extracted data, new lineIndex.
@@ -887,8 +980,6 @@ func ShowLastExternalBackup() string {
 	return msg
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////
-
 func GetOutputPath(filePath, ext string) string {
 	return filePath[:len(filePath)-len(filepath.Ext(filePath))] + ext
 }
@@ -911,44 +1002,31 @@ func LoadCsvSensorDataIntoDatabase(programArgs []string) {
 
 // First reads the *.var file for meta-information and then the *.nc file (in same folder).
 func LoadNcSensorDataIntoDatabase(programArgs []string) {
-	inputFile := programArgs[1] // *.nc file
-	fileType := programArgs[2]  // subtype of *.nc file.
-	identifier := ""
-	if len(programArgs) > 3 {
-		identifier = programArgs[3]
-	}
+	inputFile := programArgs[1]                // *.nc file
+	fileType := programArgs[2]                 // subtype of *.nc file.
+	outputPath := GetOutputPath(inputFile, "") // path has no extension
+	datasetName := path.Base(outputPath)       // Jan_clean
 	command := ""
-	if len(programArgs) > 4 {
-		command = programArgs[4]
+	if len(programArgs) >= 3 {
+		command = programArgs[3]
 		fmt.Println(command)
 	}
 
-	outputPath := GetOutputPath(inputFile, "") // no extension
-	uploadName := path.Base(inputFile)         // Jan_clean.nc
-	netcdf, err := ParseVariableFile(outputPath+".var", fileType, identifier)
+	netcdf, err := ParseVariableFile(outputPath+".var", fileType, datasetName)
 	checkErr("ParseVariableFile", err)
 	//fmt.Println(netcdf.ToString(true)) // true => output variables
-
-	json, err := netcdf.Format_Json()
-	checkErr("netcdf.Format_Json", err)
-	err = fs.WriteTextLines(json, outputPath+jsonExtension, false)
-	checkErr("fs.WriteTextLines(json)", err)
-	err = UploadFile(DataSetPrefix+uploadName+jsonExtension, json)
-	checkErr("UploadFile: "+DataSetPrefix+uploadName+jsonExtension, err)
 
 	ontology := netcdf.Format_Ontology()
 	err = fs.WriteTextLines(ontology, outputPath+serializationExtension, false)
 	checkErr("fs.WriteTextLines("+serializationExtension+")", err)
-	err = UploadFile(DataSetPrefix+uploadName+serializationExtension, ontology)
-	checkErr("UploadFile: "+DataSetPrefix+uploadName+serializationExtension, err)
+	err = UploadFile(DataSetPrefix+datasetName+serializationExtension, ontology)
+	checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
 
 	sparqlQuery := netcdf.Format_SparqlQuery()
 	err = fs.WriteTextLines(sparqlQuery, outputPath+sparqlExtension, false)
 	checkErr("fs.WriteTextLines(sparql)", err)
-	err = UploadFile(DataSetPrefix+uploadName+sparqlExtension, sparqlQuery)
-	checkErr("UploadFile: "+DataSetPrefix+uploadName+sparqlExtension, err)
-
-	//<<<< read entire *.nc data file
+	err = UploadFile(DataSetPrefix+datasetName+sparqlExtension, sparqlQuery)
+	checkErr("UploadFile: "+DataSetPrefix+datasetName+sparqlExtension, err)
 }
 
 func LoadHd5SensorDataIntoDatabase(programArgs []string) {
@@ -957,7 +1035,7 @@ func LoadHd5SensorDataIntoDatabase(programArgs []string) {
 
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
 func main() {
-	fmt.Println(ShowLastExternalBackup())
+	//fmt.Println(ShowLastExternalBackup())
 	sourceDataType := "help"
 	if len(os.Args) > 1 {
 		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
@@ -1581,7 +1659,7 @@ func DisplayDuplicateEntities() {
 	}
 }
 
-/* *********************************************************************************************************** */
+///////////////////////////////////////////////////////////////////////////////////////////
 
 type JsonClassSuperClass struct {
 	Head struct {
@@ -1706,7 +1784,7 @@ const (
 	LastColumnName   = "DatasetName"
 )
 
-//var formattedUnits = []string{"yyyy-MM-ddThh:mm:ssZ,RFC3339", "unicode,string", "unixutc,long", "m/h,meters/hour", "knots,knots","percent,percent" }
+//var formattedUnits = []string{"longtime", "yyyy-MM-ddThh:mm:ssZ", "unicode", "unixutc", meters/hour", "knots", "percent" } "unitless"=>"unicode"
 
 // Return a formatted value based upon the imported unit_of_measure.
 func GetFormattedUnitMeasure(value, uom string) string {
@@ -1715,7 +1793,6 @@ func GetFormattedUnitMeasure(value, uom string) string {
 
 // Return a NamedIndividual unit_of_measure from an abreviated key. All of these are specified at the uomPrefix URI.
 // This expects you to manually add the map keys to the (last) Units column header in every *.var file.
-// If the Units value contains a comma, then call GetFormattedUnitMeasure() instead.
 func GetNamedIndividualUnitMeasure(uom string) string {
 	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
 	var unitsOfMeasure = map[string]string{
@@ -1819,7 +1896,7 @@ var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
 // select this column of values from summary file as instance values.
-var summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "units", LastColumnName}
+var summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "units"} // , LastColumnName
 
 // All ports must be open.
 func testRemoteAddressPortsOpen(host string, ports []string) (bool, error) {
@@ -1885,6 +1962,85 @@ func TimeDifference(a, b time.Time) (year, month, day, hour, min, sec int) {
 	return
 }
 
+// Replace embedded quote marks with backticks; return enclosed string.
+// Could format floats to constant width,precision. This function is called millions of times.
+func formatDataItem(s, dataType string) string {
+	if dataType == "string" {
+		ss := strings.ReplaceAll(strings.ReplaceAll(s, "\"", "`"), "'", "`")
+		return "'" + ss + "'"
+	} else {
+		if len(s) == 0 {
+			return "null"
+		} else {
+			return s
+		}
+	}
+}
+
+// Return quoted name and its alias. Alias: open brackets are replaced with underscore.
+// Need to handle 2 aliases being the same.  Handles some IotDB reserved keywords.
+// return MeasurementName, MeasurementAlias.
+func StandardName(oldName string) (string, string) {
+	newName := strings.TrimSpace(cases.Title(language.Und, cases.NoLower).String(oldName)) // uppercase first letter
+	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
+	alias := strings.ReplaceAll(newName, " ", "")
+	alias = replacer.Replace(alias)
+	if newName != alias {
+		return alias, newName
+	} else {
+		return newName, alias
+	}
+}
+
+// someTime can be either a long or a readable dateTime string.
+func getStartTime(someTime string) (time.Time, error) {
+	isLong, err := strconv.ParseInt(someTime, 10, 64)
+	if err == nil {
+		return time.Unix(isLong, 0), err
+	}
+	t, err := time.Parse(TimeFormat, someTime)
+	if err != nil {
+		return time.Unix(isLong, 0), err
+	}
+	return t, nil
+}
+
+// Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
+// (client.TSDataType, client.TSEncoding, client.TSCompressionType)
+func getClientStorage(dataColumnType string) (string, string, string) {
+	sw := strings.ToLower(dataColumnType)
+	switch sw {
+	case "boolean":
+		return "BOOLEAN", "RLE", "SNAPPY"
+	case "string":
+		return "TEXT", "PLAIN", "SNAPPY"
+	case "integer":
+		return "INT64", "GORILLA", "SNAPPY"
+	case "long":
+		return "INT64", "GORILLA", "SNAPPY"
+	case "float":
+		return "FLOAT", "GORILLA", "SNAPPY"
+	case "double":
+		return "DOUBLE", "GORILLA", "SNAPPY"
+	case "decimal":
+		return "DOUBLE", "GORILLA", "SNAPPY"
+	}
+	return "TEXT", "PLAIN", "SNAPPY"
+}
+
+func StandardDate(dt time.Time) string {
+	var a [20]byte
+	var b = a[:0]                        // Using the a[:0] notation converts the fixed-size array to a slice type represented by b that is backed by this array.
+	b = dt.AppendFormat(b, time.RFC3339) // AppendFormat() accepts type []byte. The allocated memory a is passed to AppendFormat().
+	return string(b[0:10])
+}
+
+func GetUniqueInstanceID() string {
+	dateTime := StandardDate(time.Now())
+	dateTime = strings.ReplaceAll(dateTime, "-", "")
+	return `_` + dateTime
+}
+
 type IoTDbProgramParameters struct {
 	Host     string `json:"host"`
 	Port     string `json:"port"`
@@ -1930,6 +2086,8 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 	}
 	return connectStr, true
 }
+
+///////////////////////////////////////////////////////////////////////////////////////////
 
 type IoTDbDataFile struct {
 	session            client.Session // for (iot *IoTDbDataFile) methods.
@@ -1996,39 +2154,6 @@ func (iot *IoTDbDataFile) OutputDescription(displayColumnInfo bool) string {
 		}
 	}
 	return sb.String()
-}
-
-// Expects comma-separated files. Assigns Dataset or Summary.
-func (iot *IoTDbDataFile) ReadCsvFile(filePath string, isDataset bool) {
-	f, err := os.Open(filePath)
-	checkErr("Unable to read csv file "+filePath, err)
-	defer f.Close()
-	fmt.Println("Reading " + filePath)
-	csvReader := csv.NewReader(f)
-	if !isDataset {
-		iot.Summary, err = csvReader.ReadAll()
-	} else {
-		iot.Dataset, err = csvReader.ReadAll()
-	}
-	checkErr("Unable to parse file as CSV for "+filePath, err)
-}
-
-// Return quoted name and its alias. Alias: open brackets are replaced with underscore.
-// Need to handle 2 aliases being the same.  Handles some IotDB reserved keywords.
-// return MeasurementName, MeasurementAlias.
-func StandardName(oldName string) (string, string) {
-	newName := cases.Title(language.Und, cases.NoLower).String(oldName) // uppercase first letter
-	/*if strings.ToLower(newName) == "time" {
-		newName = "time1"
-	}*/
-	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
-	alias := strings.ReplaceAll(newName, " ", "")
-	alias = replacer.Replace(alias)
-	if newName != alias {
-		return alias, newName
-	} else {
-		return newName, alias
-	}
 }
 
 // search for either original or alias name
@@ -2126,21 +2251,6 @@ func (iot *IoTDbDataFile) FormattedColumnNames() string {
 	return str
 }
 
-// Replace embedded quote marks with backticks; return enclosed string.
-// Could format floats to constant width,precision. This function is called millions of times.
-func formatDataItem(s, dataType string) string {
-	if dataType == "string" {
-		ss := strings.ReplaceAll(strings.ReplaceAll(s, "\"", "`"), "'", "`")
-		return "'" + ss + "'"
-	} else {
-		if len(s) == 0 {
-			return "null"
-		} else {
-			return s
-		}
-	}
-}
-
 // COUNT TIMESERIES root.datasets.etsi.household_data_60min_singleindex.DatasetName;
 // Each ALIGNED insert statement inserts one row.  Dataset includes header row so subtract 1.
 // Automatically inserts long time column as first column (which should be UTC)  NOT USED!
@@ -2169,53 +2279,19 @@ func (iot *IoTDbDataFile) SaveInsertStatements() { // []string {
 	checkErr("SaveInsertStatements("+iot.DataFilePath+".iotdb.multiple.insert"+")", err)
 }
 
-// someTime can be either a long or a readable dateTime string.
-func getStartTime(someTime string) (time.Time, error) {
-	isLong, err := strconv.ParseInt(someTime, 10, 64)
-	if err == nil {
-		return time.Unix(isLong, 0), err
+// Expects comma-separated files. Assigns Dataset or Summary. REFACTOR
+func (iot *IoTDbDataFile) ReadCsvFile(filePath string, isDataset bool) {
+	f, err := os.Open(filePath)
+	checkErr("Unable to read csv file: ", err)
+	defer f.Close()
+	fmt.Println("Reading " + filePath)
+	csvReader := csv.NewReader(f)
+	if !isDataset {
+		iot.Summary, err = csvReader.ReadAll()
+	} else {
+		iot.Dataset, err = csvReader.ReadAll()
 	}
-	t, err := time.Parse(TimeFormat, someTime)
-	if err != nil {
-		return time.Unix(isLong, 0), err
-	}
-	return t, nil
-}
-
-// Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
-// (client.TSDataType, client.TSEncoding, client.TSCompressionType)
-func getClientStorage(dataColumnType string) (string, string, string) {
-	sw := strings.ToLower(dataColumnType)
-	switch sw {
-	case "boolean":
-		return "BOOLEAN", "RLE", "SNAPPY"
-	case "string":
-		return "TEXT", "PLAIN", "SNAPPY"
-	case "integer":
-		return "INT64", "GORILLA", "SNAPPY"
-	case "long":
-		return "INT64", "GORILLA", "SNAPPY"
-	case "float":
-		return "FLOAT", "GORILLA", "SNAPPY"
-	case "double":
-		return "DOUBLE", "GORILLA", "SNAPPY"
-	case "decimal":
-		return "DOUBLE", "GORILLA", "SNAPPY"
-	}
-	return "TEXT", "PLAIN", "SNAPPY"
-}
-
-func StandardDate(dt time.Time) string {
-	var a [20]byte
-	var b = a[:0]                        // Using the a[:0] notation converts the fixed-size array to a slice type represented by b that is backed by this array.
-	b = dt.AppendFormat(b, time.RFC3339) // AppendFormat() accepts type []byte. The allocated memory a is passed to AppendFormat().
-	return string(b[0:10])
-}
-
-func GetUniqueInstanceID() string {
-	dateTime := StandardDate(time.Now())
-	dateTime = strings.ReplaceAll(dateTime, "-", "")
-	return `_` + dateTime
+	checkErr("Unable to parse file as CSV for "+filePath, err)
 }
 
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
@@ -2312,7 +2388,6 @@ func (iot *IoTDbDataFile) ProcessTimeseries() error {
 		switch command {
 		case "drop": // timeseries schema; uses single statement;
 			sql := "DROP TIMESERIES " + IotDatasetPrefix + iot.DatasetName + ".*"
-			fmt.Println(sql)
 			_, err := iot.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
 			for k := range iot.Measurements {
