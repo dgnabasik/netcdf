@@ -129,21 +129,21 @@ type MeasurementVariable struct {
 
 // Generic NetCDF container. Not stored in IotDB.
 type NetCDF struct {
-	Identifier       string                `json:"identifier"` // Unique ID to distinguish among different datasets.
-	NetcdfType       string                `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
-	Dimensions       map[string]int        `json:"dimensions"`
-	Title            string                `json:"title"`
-	Description      string                `json:"description"`
-	Conventions      string                `json:"conventions"`
-	Institution      string                `json:"institution"`
-	Code_url         string                `json:"code_url"`
-	Location_meaning string                `json:"location_meaning"`
-	Datastream_name  string                `json:"datastream_name"`
-	Input_files      string                `json:"input_files"`
-	History          string                `json:"history"`
-	Variables        []MeasurementVariable `json:"variables"`       //<<<< change to Measurements       map[string]MeasurementItem `json:"measurements"`
-	HouseIndices     []string              `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
-	LongtimeIndices  []string              `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
+	Identifier       string                         `json:"identifier"` // Unique ID to distinguish among different datasets.
+	NetcdfType       string                         `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
+	Dimensions       map[string]int                 `json:"dimensions"`
+	Title            string                         `json:"title"`
+	Description      string                         `json:"description"`
+	Conventions      string                         `json:"conventions"`
+	Institution      string                         `json:"institution"`
+	Code_url         string                         `json:"code_url"`
+	Location_meaning string                         `json:"location_meaning"`
+	Datastream_name  string                         `json:"datastream_name"`
+	Input_files      string                         `json:"input_files"`
+	History          string                         `json:"history"`
+	Measurements     map[string]MeasurementVariable `json:"measurements"`
+	HouseIndices     []string                       `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
+	LongtimeIndices  []string                       `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
 	// these are not in the source file.
 	DataFilePath    string     `json:"datafilepath"`
 	DataFileType    string     `json:"datafiletype"`
@@ -184,11 +184,11 @@ func (cdf NetCDF) ToString(outputVariables bool) string {
 	sb.WriteString("DatastreamName : " + cdf.Datastream_name + sep)
 	sb.WriteString("InputFiles     : " + cdf.Input_files + sep)
 	sb.WriteString("History        : " + cdf.History + sep)
-	sb.WriteString("Variables      : ")
-	sb.WriteString(strconv.Itoa(len(cdf.Variables)) + sep)
+	sb.WriteString("Measurements      : ")
+	sb.WriteString(strconv.Itoa(len(cdf.Measurements)) + sep)
 
 	if outputVariables {
-		for _, tv := range cdf.Variables {
+		for _, tv := range cdf.Measurements {
 			sb.WriteString(" MeasurementName: " + tv.MeasurementItem.MeasurementName + "; ReturnType: " + tv.MeasurementItem.MeasurementType + "; ")
 			if len(tv.MeasurementItem.MeasurementAlias) > 0 {
 				sb.WriteString(" LongName: " + tv.MeasurementItem.MeasurementAlias + ";")
@@ -230,7 +230,7 @@ func (cdf NetCDF) Format_DBcreate() []string {
 	var cdfTypeMap = map[string]string{"string": "TEXT", "double": "DOUBLE", "int": "INT32", "int64": "INT64", "bool": "BOOLEAN"} // map CDF to IotDB datatypes.
 	var encodeMap = map[string]string{"string": "PLAIN", "double": "RLE", "int": "RLE", "int64": "RLE", "bool": "PLAIN"}
 	lines := make([]string, 0)
-	for _, tv := range cdf.Variables { // Msg: 700: Error occurred while parsing SQL to physical plan: line 1:55 no viable alternative at input '.time'
+	for _, tv := range cdf.Measurements { // Msg: 700: Error occurred while parsing SQL to physical plan: line 1:55 no viable alternative at input '.time'
 		str := "CREATE TIMESERIES " + cdf.Identifier + "." + cdf.StandardNameAlias(tv.MeasurementItem.MeasurementName) + " with datatype=" + cdfTypeMap[tv.MeasurementItem.MeasurementType] + ", encoding=" + encodeMap[tv.MeasurementItem.MeasurementType] + ";"
 		lines = append(lines, str)
 	}
@@ -241,8 +241,8 @@ func (cdf NetCDF) Format_DBcreate() []string {
 func (cdf NetCDF) FormattedColumnNames() string {
 	var sb strings.Builder
 	sb.WriteString("(")
-	for ndx := range cdf.Variables {
-		sb.WriteString(cdf.StandardNameAlias(cdf.Variables[ndx].MeasurementName) + ",")
+	for ndx := range cdf.Measurements {
+		sb.WriteString(cdf.StandardNameAlias(cdf.Measurements[ndx].MeasurementName) + ",")
 	}
 	str := sb.String()[0:len(sb.String())-1] + ")"
 	return str
@@ -308,14 +308,19 @@ func (cdf NetCDF) Format_SparqlQuery() []string {
 	return output
 }
 
-// search for either original or alias name
-func (cdf NetCDF) GetMeasurementItemFromName(name string) (MeasurementItem, bool) {
-	for _, item := range cdf.Variables {
-		if name == item.MeasurementName || name == item.MeasurementAlias {
-			return item.MeasurementItem, true
+// accept either original or alias names.
+func (cdf NetCDF) GetMeasurementVariableFromName(name string) (MeasurementVariable, bool) {
+	item, ok := cdf.Measurements[name]
+	if ok {
+		return item, true
+	}
+	// check alias names
+	for _, item := range cdf.Measurements {
+		if name == item.MeasurementAlias || strings.ToLower(name) == strings.ToLower(item.MeasurementItem.MeasurementName) {
+			return item, true
 		}
 	}
-	return MeasurementItem{}, false
+	return MeasurementVariable{}, false
 }
 
 // Return all column values except header row. Return false if wrong column name. Fill in default values.
@@ -324,10 +329,10 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	if columnIndex < 0 {
 		return []string{}, false
 	}
-	stats := make([]string, len(cdf.Variables))
-	for ndx := 0; ndx < len(cdf.Variables)-1; ndx++ {
-		dataColumnName, _ := StandardName(cdf.Summary[ndx+1][0]) // aliasName
-		item, _ := cdf.GetMeasurementItemFromName(dataColumnName)
+	stats := make([]string, len(cdf.Measurements))
+	for ndx := 0; ndx < len(cdf.Measurements)-1; ndx++ {
+		dataColumnName, _ := StandardName(cdf.Summary[ndx+1][0])      // aliasName
+		item, _ := cdf.GetMeasurementVariableFromName(dataColumnName) // MeasurementVariable
 		stats[ndx] = strings.TrimSpace(cdf.Summary[ndx+1][columnIndex])
 		if item.MeasurementType == "integer" {
 			index := strings.Index(stats[ndx], ".")
@@ -347,13 +352,15 @@ func (cdf NetCDF) Format_Ontology() []string {
 	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific timeseries DatatypeProperties`)
-	for ndx, v := range cdf.Variables {
+	ndx := 0
+	for _, v := range cdf.Measurements {
 		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
-		if ndx < len(cdf.Variables) {
+		if ndx < len(cdf.Measurements) {
 			str += `] ,`
 		} else {
 			str += `] ;`
 		}
+		ndx++
 		output = append(output, str)
 	}
 
@@ -381,11 +388,11 @@ func (cdf NetCDF) Format_Ontology() []string {
 	output = append(output, `  saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ;`+crlf)
 
 	if ok {
-		for ndx := 0; ndx < len(cdf.Variables); ndx++ {
-			for _, v := range cdf.Variables { //
+		for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
+			for _, v := range cdf.Measurements { //
 				if v.ColumnOrder == ndx {
 					str := s4data + v.MeasurementName + `  "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[v.MeasurementType]
-					if v.ColumnOrder < len(cdf.Variables)-1 {
+					if v.ColumnOrder < len(cdf.Measurements)-1 {
 						str += ` ;`
 					} else {
 						str += ` .`
@@ -406,8 +413,8 @@ func (cdf *NetCDF) OutputSummaryCsvFile() ([]string, error) {
 	xsdMap := map[string]string{"string": "Unicode", "float": "Float", "integer": "Integer", "double": "double"}
 	csvLines := make([]string, 0)
 	csvLines = append(csvLines, strings.Join(summaryColumnNames, ","))
-	for ndx := 0; ndx < len(cdf.Variables); ndx++ {
-		for _, v := range cdf.Variables { // <<<< add calculated fields.
+	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
+		for _, v := range cdf.Measurements { // <<<< add calculated fields.
 			if v.ColumnOrder == ndx {
 				str := v.MeasurementName + "," + xsdMap[v.MeasurementItem.MeasurementType]
 				switch v.MeasurementItem.MeasurementType {
@@ -443,11 +450,22 @@ func (cdf *NetCDF) ReadCsvFile(filePath string, isDataset bool) {
 	checkErr("Unable to parse file as CSV for "+filePath, err)
 }
 
+// Index each dimension
+func (cdf *NetCDF) getDimensionMap() map[string]int {
+	dimensionMap := make(map[string]int, len(cdf.Dimensions))
+	index := 1
+	for k := range cdf.Dimensions {
+		dimensionMap[k] = index
+		index++
+	}
+	return dimensionMap
+}
+
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (cdf *NetCDF) XsvSummaryTypeMap() {
 	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer"}
-	cdf.Measurements = make(map[string]MeasurementItem, 0)
+	cdf.Measurements = make(map[string]MeasurementVariable, 0)
 	// get units column
 	unitsColumn := 0
 	for ndx := 0; ndx < len(cdf.Summary[0]); ndx++ { // iterate over summary header row
@@ -457,6 +475,7 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 		}
 	}
 	ndx1 := 0
+	dimMap := cdf.getDimensionMap()
 	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
 		if cdf.Summary[ndx+1][0] == "interpolated" || len(cdf.Summary[ndx+1][0]) < 2 {
 			ndx1 = ndx
@@ -472,9 +491,18 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 				MeasurementUnits: cdf.Summary[ndx+1][unitsColumn],
 				ColumnOrder:      ndx,
 			}
-			cdf.Measurements[dataColumnName] = mi // add to map using original name
+			dimIndex, _ := dimMap[dataColumnName]
+			mv := MeasurementVariable{
+				MeasurementItem: mi,
+				DimensionIndex:  dimIndex,
+				FillValue:       "0. ", // or ""
+				Comment:         "",
+				Calendar:        "",
+			}
+			cdf.Measurements[dataColumnName] = mv // add to map using original name
 		}
 	}
+
 	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
 	mi := MeasurementItem{
 		MeasurementName:  LastColumnName,
@@ -483,7 +511,15 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 		MeasurementUnits: "unicode,string",
 		ColumnOrder:      ndx1,
 	}
-	cdf.Measurements[LastColumnName] = mi
+	dimIndex, _ := dimMap[LastColumnName]
+	mv := MeasurementVariable{
+		MeasurementItem: mi,
+		DimensionIndex:  dimIndex,
+		FillValue:       "0. ", // or ""
+		Comment:         "",
+		Calendar:        "",
+	}
+	cdf.Measurements[LastColumnName] = mv
 }
 
 // Return NetCDF struct by parsing Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
@@ -507,7 +543,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 		netcdf.Identifier = identifier
 	}
 	netcdf.Dimensions = make(map[string]int, 0)
-	netcdf.Variables = make([]MeasurementVariable, 0)
+	netcdf.Measurements = make(map[string]MeasurementVariable, 0)
 	lineIndex++
 
 	if strings.Contains(lines[lineIndex], "dimensions:") {
@@ -527,13 +563,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 	}
 
 	// Index each dimension
-	dimensionMap := make(map[string]int, len(netcdf.Dimensions))
-	index := 1
-	for k := range netcdf.Dimensions {
-		dimensionMap[k] = index
-		index++
-	}
-
+	dimMap := netcdf.getDimensionMap()
 	if strings.Contains(lines[lineIndex], "variables:") {
 		columnIndex := 0
 		offset := 1
@@ -549,7 +579,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			tmpVar.MeasurementItem.MeasurementName = standardname
 			tmpVar.MeasurementItem.MeasurementAlias = standardname
 			tmpVar.MeasurementItem.MeasurementType = tokens[0]
-			val, ok := dimensionMap[tmpVar.MeasurementItem.MeasurementName]
+			val, ok := dimMap[tmpVar.MeasurementItem.MeasurementName]
 			if ok {
 				tmpVar.DimensionIndex = val
 			}
@@ -579,7 +609,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 				thisVariable = strings.Contains(lines[lineIndex+1], tmpVar.MeasurementItem.MeasurementName+":")
 			}
 			if tmpVar.MeasurementItem.MeasurementName != "=" { // hack
-				netcdf.Variables = append(netcdf.Variables, tmpVar)
+				netcdf.Measurements[tmpVar.MeasurementName] = tmpVar
 				columnIndex++
 			}
 		}
