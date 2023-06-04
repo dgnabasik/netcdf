@@ -46,8 +46,8 @@ import (
 	"time"
 
 	"github.com/apache/iotdb-client-go/client"
-	"github.com/batchatco/go-native-netcdf/netcdf"
 	fs "github.com/dgnabasik/acmsearchlib/filesystem"
+	"github.com/fhs/go-netcdf/netcdf"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 	//"github.com/dgnabasik/netcdf/graphdb"
@@ -62,6 +62,7 @@ const ( // these do not include trailing >
 	SarefEtsiOrg           = "https://saref.etsi.org/"
 	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
 	IotDataPrefix          = "root.datasets.etsi."
+	timeseriesDescription  = "/description.txt"
 	serializationExtension = ".ttl" //trig<<< Classic Turtle does not support named graphs. Must output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	jsonExtension          = ".json"
@@ -181,7 +182,6 @@ type NetCDF struct {
 	// these are not in the source file.
 	TimeseriesCommands []string   `json:"timeseriescommands"` // command-line parameters
 	DataFilePath       string     `json:"datafilepath"`
-	DataFileType       string     `json:"datafiletype"`
 	SummaryFilePath    string     `json:"summaryfilepath"`
 	DatasetName        string     `json:"datasetname"`
 	Summary            [][]string `json:"summary"` // from summary file
@@ -558,29 +558,116 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	cdf.Measurements[LastColumnName] = mv
 }
 
-// <<<< If !isNew => assume timeseries have been created; erase existing data; insert data.
+// Assume timeseries have been created; erase existing data; insert data. Assigns cdf.Dataset.
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB(ncDatafilePath string) {
-	// Open the file
+	// Open the file; read each timeseries concurrently?
 	nc, err := netcdf.Open(ncDatafilePath)
 	if err != nil {
-		panic(err)
+		checkErr("Could not access "+ncDatafilePath, err)
 	}
 	defer nc.Close()
 
-	// Read the NetCDF variable from the file
-	vr, _ := nc.GetVariable("Indoor_AverageTemperature")
-	if vr == nil {
-		panic("Indoor_AverageTemperature variable not found")
+	// Read every NetCDF variable to construct an aligned timeseries.
+	for _, item := range cdf.Measurements {
+		if item.MeasurementName == "id" || item.MeasurementName == "time" {
+			fmt.Println("Skipping " + item.MeasurementName)
+			continue
+		}
+		fmt.Print(item.MeasurementName + "  " + item.MeasurementType + "  ")
+		vr, _ := nc.GetVariable(item.MeasurementName) //<<<< fails on string
+		if vr == nil {
+			checkErr(item.MeasurementName+" timeseries not found!", errors.New("nc.GetVariable"))
+		}
+
+		// mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
+		switch item.MeasurementType {
+		case "double":
+			lats, has := vr.Values.([][]float64)
+			if !has {
+				fmt.Println(item.MeasurementName + " data not found!")
+				//<<<< item.ColumnOrder = -1
+				continue
+			}
+			fmt.Println(len(lats))
+		case "string": // char is a scalar in NetCDF and Go has no scalar character type. Scalar characters in NetCDF will be returned as strings of length one.
+			lats, has := vr.Values.([][]byte)
+			if !has {
+				fmt.Println(item.MeasurementName + " data not found!")
+
+				continue
+			}
+			fmt.Println(len(lats))
+		case "int":
+			lats, has := vr.Values.([][]int32)
+			if !has {
+				fmt.Println(item.MeasurementName + " data not found!")
+				continue
+			}
+			fmt.Println(len(lats))
+		case "int64":
+			lats, has := vr.Values.([][]float64)
+			if !has {
+				fmt.Println(item.MeasurementName + " data not found!")
+				continue
+			}
+			fmt.Println(len(lats))
+		case "bool":
+			lats, has := vr.Values.([][]bool)
+			if !has {
+				fmt.Println(item.MeasurementName + " data not found!")
+				continue
+			}
+			fmt.Println(len(lats))
+		}
+		/*for c := 0; c < len(cdf.Dataset[r])-1; c++ {
+			if item.ColumnOrder == c {
+				sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementType) + ",")
+			}
+		}*/
 	}
-	// Cast the data into a Go type we can use
-	lats, has := vr.Values.([][]float64)
-	if !has {
-		panic("latitude data not found")
-	}
-	for i, lat := range lats {
-		fmt.Println(i, lat)
-		break
-	}
+
+	/*
+	   const blockSize = 163840 // safe
+	   nBlocks := len(cdf.Dataset)/(blockSize) + 1
+
+	   	for block := 0; block < nBlocks; block++ {
+	   		var sb strings.Builder
+	   		var insert strings.Builder
+	   		insert.WriteString("INSERT INTO " + IotDatasetPrefix + cdf.DatasetName + " (time," + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
+	   		startRow := 1
+	   		if block > 0 {
+	   			startRow = blockSize*block + 1
+	   		}
+	   		endRow := startRow + blockSize
+	   		if block == nBlocks-1 {
+	   			endRow = len(cdf.Dataset)
+	   		}
+	   		fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
+	   		for r := startRow; r < endRow; r++ {
+	   			sb.Reset()
+	   			startTime, err := getStartTime(cdf.Dataset[r][0])
+	   			if err != nil {
+	   				fmt.Println(cdf.Dataset[r][0])
+	   				break
+	   			}
+	   			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
+	   			for c := 0; c < len(cdf.Dataset[r])-1; c++ {
+	   				for _, item := range cdf.Measurements {
+	   					if item.ColumnOrder == c {
+	   						sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementType) + ",")
+	   					}
+	   				}
+	   			}
+	   			sb.WriteString(formatDataItem(cdf.DatasetName, "string") + ")")
+	   			if r < endRow-1 {
+	   				sb.WriteString(",")
+	   			}
+	   			insert.WriteString(sb.String())
+	   		}
+	   		_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
+	   		checkErr("ExecuteNonQueryStatement(insertStatement)", err)
+	   	}
+	*/
 }
 
 // Looks the same as the iot version!
@@ -624,8 +711,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			checkErr("ExecuteBatchStatement(deleteStatements)", err)
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
-			// Automatically inserts long time column as first column (which should be UTC). Avoid returning huge result. Save in blocks.
-			const blockSize = 163840 // safe
+			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
+			const blockSize = 163840 // safe=20*8192
 			nBlocks := len(cdf.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
 				var sb strings.Builder
@@ -689,27 +776,26 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 // Return NetCDF struct by parsing Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
 func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
-	netcdf := NetCDF{}
+	xcdf := NetCDF{}
 	lines, err := fs.ReadTextLines(fname, false)
 	if err != nil {
 		fmt.Println(err)
-		return netcdf, err
+		return xcdf, err
 	}
-	netcdf.DataFilePath = fname
-	datasetPathName := filepath.Base(netcdf.DataFilePath) // does not include trailing slash
-	netcdf.DataFileType = strings.ToLower(path.Ext(netcdf.DataFilePath))
-	netcdf.SummaryFilePath = strings.Replace(netcdf.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
-	netcdf.SummaryFilePath = strings.Replace(netcdf.SummaryFilePath, varExtension, csvExtension, 1)
-	netcdf.DatasetName = identifier
+	xcdf.DataFilePath = fname
+	datasetPathName := filepath.Base(xcdf.DataFilePath) // does not include trailing slash
+	xcdf.SummaryFilePath = strings.Replace(xcdf.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
+	xcdf.SummaryFilePath = strings.Replace(xcdf.SummaryFilePath, varExtension, csvExtension, 1)
+	xcdf.DatasetName = identifier
 	lineIndex := 0
 	tokens := strings.Split(lines[lineIndex], " ")
-	netcdf.NetcdfType = filetype
-	netcdf.Identifier = tokens[1]
+	xcdf.NetcdfType = filetype
+	xcdf.Identifier = tokens[1]
 	if len(identifier) > 0 {
-		netcdf.Identifier = identifier
+		xcdf.Identifier = identifier
 	}
-	netcdf.Dimensions = make(map[string]int, 0)
-	netcdf.Measurements = make(map[string]MeasurementVariable, 0)
+	xcdf.Dimensions = make(map[string]int, 0)
+	xcdf.Measurements = make(map[string]MeasurementVariable, 0)
 	lineIndex++
 
 	if strings.Contains(lines[lineIndex], "dimensions:") {
@@ -719,7 +805,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
 			size, e := strconv.Atoi(tokens[2])
 			if e == nil {
-				netcdf.Dimensions[tokens[0]] = size
+				xcdf.Dimensions[tokens[0]] = size
 			} else {
 				fmt.Println("Error converting Dimension " + tokens[0])
 			}
@@ -728,7 +814,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 		lineIndex++
 	}
 
-	dimMap := netcdf.getDimensionMap()
+	dimMap := xcdf.getDimensionMap()
 	if strings.Contains(lines[lineIndex], "variables:") {
 		columnIndex := 0
 		offset := 1
@@ -798,7 +884,7 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			if len(tmpVar.MeasurementItem.MeasurementUnits) == 0 {
 				tmpVar.MeasurementItem.MeasurementUnits = "unitless"
 			}
-			netcdf.Measurements[tmpVar.MeasurementItem.MeasurementName] = tmpVar
+			xcdf.Measurements[tmpVar.MeasurementItem.MeasurementName] = tmpVar
 		}
 	}
 
@@ -810,40 +896,40 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 		}
 		tokens := strings.Split(lines[lineIndex], "\"")
 		if strings.Contains(lines[lineIndex], ":title") {
-			netcdf.Title = tokens[offset]
+			xcdf.Title = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":description") {
-			netcdf.Description = tokens[offset]
+			xcdf.Description = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":conventions") {
-			netcdf.Conventions = tokens[offset]
+			xcdf.Conventions = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":institution") {
-			netcdf.Institution = tokens[offset]
+			xcdf.Institution = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":code_url") {
-			netcdf.Code_url = tokens[offset]
+			xcdf.Code_url = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":location_meaning") {
-			netcdf.Location_meaning = tokens[offset]
+			xcdf.Location_meaning = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":datastream_name") {
-			netcdf.Datastream_name = tokens[offset]
+			xcdf.Datastream_name = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":input_files") {
-			netcdf.Input_files = tokens[offset]
+			xcdf.Input_files = tokens[offset]
 		}
 		if strings.Contains(lines[lineIndex], ":history") {
-			netcdf.History = tokens[offset]
+			xcdf.History = tokens[offset]
 		}
 		lineIndex++
 	}
 
 	lineIndex = lineIndex + 2
-	//netcdf.HouseIndices = make([]string, netcdf.Dimensions["id"])
-	//netcdf.LongtimeIndices = make([]string, netcdf.Dimensions["time"])
-	netcdf.HouseIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["id"], lineIndex, lines)
-	netcdf.LongtimeIndices, lineIndex = parseDimensionIndices(netcdf.Dimensions["time"], lineIndex, lines)
+	//xcdf.HouseIndices = make([]string, xcdf.Dimensions["id"])
+	//xcdf.LongtimeIndices = make([]string, xcdf.Dimensions["time"])
+	xcdf.HouseIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["id"], lineIndex, lines)
+	xcdf.LongtimeIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["time"], lineIndex, lines)
 	lineIndex++
 
 	/* dimIndex := 0
@@ -856,10 +942,10 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
 		}
 		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			netcdf.HouseIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(netcdf.HouseIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(netcdf.HouseIndices[dimIndex], "=")
-				netcdf.HouseIndices[dimIndex] = tok2[1]
+			xcdf.HouseIndices[dimIndex] = prettifyString(tokens[ndx])
+			if strings.Contains(xcdf.HouseIndices[dimIndex], "=") { // remove variable names
+				tok2 := strings.Split(xcdf.HouseIndices[dimIndex], "=")
+				xcdf.HouseIndices[dimIndex] = tok2[1]
 			}
 			dimIndex++
 		}
@@ -877,17 +963,17 @@ func ParseVariableFile(fname, filetype, identifier string) (NetCDF, error) {
 			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
 		}
 		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			netcdf.LongtimeIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(netcdf.LongtimeIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(netcdf.LongtimeIndices[dimIndex], "=")
-				netcdf.LongtimeIndices[dimIndex] = tok2[1]
+			xcdf.LongtimeIndices[dimIndex] = prettifyString(tokens[ndx])
+			if strings.Contains(xcdf.LongtimeIndices[dimIndex], "=") { // remove variable names
+				tok2 := strings.Split(xcdf.LongtimeIndices[dimIndex], "=")
+				xcdf.LongtimeIndices[dimIndex] = tok2[1]
 			}
 			dimIndex++
 		}
 		lineIndex++
 	} */
 
-	return netcdf, nil
+	return xcdf, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -1199,27 +1285,42 @@ func CreateIotSession(programArgs []string) bool {
 	return createIotSession
 }
 
-/*
-	 Produce *.var file using:
-		/usr/bin/ncdump -k cdf.nc			==> get file type {classic, netCDF-4, others...}
-		/usr/bin/ncdump -c Jan_clean.nc		==> gives header + indexed {id, time} data
-*/
+// Produce *.var file using: /usr/bin/ncdump -k cdf.nc  &&  /usr/bin/ncdump -c Jan_clean.nc
 func LoadCsvSensorDataIntoDatabase(programArgs []string) {
 	createIotSession := CreateIotSession(programArgs)
-	iotdbDataFile, err := Initialize_IoTDbDataFile(createIotSession, programArgs)
-	checkErr("Initialize_IoTDbDataFile: ", err)
+	iotdbDataFile, err := Initialize_IoTDbCsvDataFile(createIotSession, programArgs)
+	checkErr("Initialize_IoTDbCsvDataFile: ", err)
 	err = iotdbDataFile.ProcessTimeseries()
 	checkErr("ProcessTimeseries(csv)", err)
 }
 
-// First reads the *.var file for meta-information and then the *.nc file (in same folder).
-func LoadNcSensorDataIntoDatabase(programArgs []string) {
-	createIotSession := CreateIotSession(programArgs)
-	_, err := Initialize_IoTDbDataFile(createIotSession, programArgs) // <<<<
-	checkErr("Initialize_IoTDbDataFile: ", err)
-	//err = iotdbDataFile.ProcessTimeseries()
-	//checkErr("ProcessTimeseries(csv)", err)
+func getTimeseriesCommands(programArgs []string) []string {
+	commands := make([]string, 0)
+	for ndx := range programArgs {
+		_, index := find(timeSeriesCommands, strings.ToLower(programArgs[ndx]))
+		if index >= 0 {
+			commands = append(commands, strings.ToLower(programArgs[ndx]))
+		}
+	}
+	return commands
+}
 
+func isAccessibleSourceFile(dataFilePath string) error {
+	exists, err := fs.FileExists(dataFilePath)
+	if !exists {
+		return err
+	}
+	checkErr("Sensor data file not readable: "+dataFilePath, err)
+	var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
+	dataFileType := strings.ToLower(path.Ext(dataFilePath))
+	_, ok := goodFileTypes[dataFileType]
+	if !ok {
+		return errors.New("Cannot process source file type: " + dataFilePath)
+	}
+	return nil
+}
+
+func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, error) {
 	inputFile := programArgs[1]                // *.nc file
 	fileType := programArgs[2]                 // subtype of *.nc file.
 	outputPath := GetOutputPath(inputFile, "") // path has no extension
@@ -1230,33 +1331,52 @@ func LoadNcSensorDataIntoDatabase(programArgs []string) {
 		fmt.Println(command)
 	}
 
-	netcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName)
+	description, _ := fs.ReadTextLines(filepath.Dir(inputFile)+timeseriesDescription, false)
+	ioTDbAccess := IoTDbAccess{ActiveSession: isActive}
+	iotdbDataFile := NetCDF{IoTDbAccess: ioTDbAccess, Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
+
+	isAccessibleSourceFile(iotdbDataFile.DataFilePath)
+	iotdbDataFile.TimeseriesCommands = getTimeseriesCommands(programArgs)
+
+	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName)
 	checkErr("ParseVariableFile", err)
-	//fmt.Println(netcdf.ToString(true)) // true => output variables
+	//fmt.Println(xcdf.ToString(true)) // true => output variables
 
-	netcdf.CopyNcTimeseriesDataIntoIotDB(inputFile)
-
-	summaryLines, err := netcdf.OutputSummaryCsvFile()
+	xcdf.CopyNcTimeseriesDataIntoIotDB(inputFile)
+	os.Exit(1) //<<<<
+	summaryLines, err := xcdf.OutputSummaryCsvFile()
 	checkErr("OutputSummaryCsvFile: ", err)
-	outputCsvFile := summaryPrefix + netcdf.DatasetName + csvExtension
-	err = fs.WriteTextLines(summaryLines, netcdf.SummaryFilePath, false)
+	outputCsvFile := summaryPrefix + xcdf.DatasetName + csvExtension
+	err = fs.WriteTextLines(summaryLines, xcdf.SummaryFilePath, false)
 	checkErr("fs.WriteTextLines(csv)", err)
 	err = UploadFile(DataSetPrefix+outputCsvFile, summaryLines)
 	checkErr("UploadFile: "+DataSetPrefix+outputCsvFile, err)
-	netcdf.ReadCsvFile(netcdf.SummaryFilePath, false) // isDataset: no, is summary
-	netcdf.XsvSummaryTypeMap()
+	xcdf.ReadCsvFile(xcdf.SummaryFilePath, false) // isDataset: no, is summary
+	xcdf.XsvSummaryTypeMap()
 
-	ontology := netcdf.Format_Ontology()
+	ontology := xcdf.Format_Ontology()
 	err = fs.WriteTextLines(ontology, outputPath+serializationExtension, false)
 	checkErr("fs.WriteTextLines("+serializationExtension+")", err)
 	err = UploadFile(DataSetPrefix+datasetName+serializationExtension, ontology)
 	checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
 
-	sparqlQuery := netcdf.Format_SparqlQuery()
+	sparqlQuery := xcdf.Format_SparqlQuery()
 	err = fs.WriteTextLines(sparqlQuery, outputPath+sparqlExtension, false)
 	checkErr("fs.WriteTextLines(sparql)", err)
 	err = UploadFile(DataSetPrefix+datasetName+sparqlExtension, sparqlQuery)
 	checkErr("UploadFile: "+DataSetPrefix+datasetName+sparqlExtension, err)
+
+	return xcdf, nil
+}
+
+// First reads the *.var file for meta-information and then the *.nc file (in same folder).
+func LoadNcSensorDataIntoDatabase(programArgs []string) {
+	createSession := CreateIotSession(programArgs)
+	xcdf, err := Initialize_IoTDbNcDataFile(createSession, programArgs)
+	checkErr("Initialize_IoTDbNcDataFile: ", err)
+	err = xcdf.ProcessTimeseries()
+	checkErr("ProcessTimeseries(csv)", err)
+
 }
 
 func LoadHd5SensorDataIntoDatabase(programArgs []string) {
@@ -2121,7 +2241,6 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 }
 
 var timeSeriesCommands = []string{"example", "drop", "create", "delete", "insert", "query"}
-var goodFileTypes = map[string]string{".nc": "ok", ".csv": "ok", ".hd5": "ok"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
@@ -2333,30 +2452,15 @@ type IoTDbCsvDataFile struct {
 	QueryResults       []string                   `json:"queryresults"`
 }
 
-func Initialize_IoTDbDataFile(isActive bool, programArgs []string) (IoTDbCsvDataFile, error) {
+func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvDataFile, error) {
 	datasetPathName := filepath.Base(programArgs[1]) // does not include trailing slash
 	datasetName := GetOutputPath(datasetPathName, "")
-	description, _ := fs.ReadTextLines(filepath.Dir(programArgs[1])+"/description.txt", false)
+	description, _ := fs.ReadTextLines(filepath.Dir(programArgs[1])+timeseriesDescription, false)
 	ioTDbAccess := IoTDbAccess{ActiveSession: isActive}
 	iotdbDataFile := IoTDbCsvDataFile{IoTDbAccess: ioTDbAccess, Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
-	exists, err := fs.FileExists(iotdbDataFile.DataFilePath)
-	if !exists {
-		return iotdbDataFile, err
-	}
-	checkErr("Sensor data file not readable: "+iotdbDataFile.DataFilePath, err)
 
-	iotdbDataFile.DataFileType = strings.ToLower(path.Ext(iotdbDataFile.DataFilePath))
-	_, ok := goodFileTypes[iotdbDataFile.DataFileType]
-	if !ok {
-		return iotdbDataFile, errors.New("Cannot process source file type: " + iotdbDataFile.DataFilePath)
-	}
-	iotdbDataFile.TimeseriesCommands = make([]string, 0)
-	for ndx := range programArgs {
-		_, index := find(timeSeriesCommands, strings.ToLower(programArgs[ndx]))
-		if index >= 0 {
-			iotdbDataFile.TimeseriesCommands = append(iotdbDataFile.TimeseriesCommands, strings.ToLower(programArgs[ndx]))
-		}
-	}
+	isAccessibleSourceFile(iotdbDataFile.DataFilePath)
+	iotdbDataFile.TimeseriesCommands = getTimeseriesCommands(programArgs)
 	// expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
 	iotdbDataFile.SummaryFilePath = strings.Replace(iotdbDataFile.DataFilePath, datasetPathName, summaryPrefix+datasetPathName, 1)
 	iotdbDataFile.ReadCsvFile(iotdbDataFile.SummaryFilePath, false) // isDataset: no, is summary
@@ -2480,34 +2584,6 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 	return str
 }
 
-// COUNT TIMESERIES root.datasets.etsi.household_data_60min_singleindex.DatasetName;
-// Each ALIGNED insert statement inserts one row.  Dataset includes header row so subtract 1.
-// Automatically inserts long time column as first column (which should be UTC)  NOT USED!
-func (iot *IoTDbCsvDataFile) SaveInsertStatements() { // []string {
-	var sb strings.Builder
-	insertTimeseriesStatements := make([]string, len(iot.Dataset)-1)
-	for r := 1; r < len(iot.Dataset); r++ {
-		sb.Reset()
-		sb.WriteString("INSERT INTO " + IotDatasetPrefix + iot.DatasetName + " (time," + iot.FormattedColumnNames() + ") ALIGNED VALUES (")
-		startTime, err := time.Parse(TimeFormat, iot.Dataset[r][0])
-		if err != nil {
-			fmt.Println(err)
-		}
-		sb.WriteString(strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-		for c := 0; c < len(iot.Dataset[r])-1; c++ { // skip 'interpolated'
-			for _, item := range iot.Measurements {
-				if item.ColumnOrder == c {
-					sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
-				}
-			}
-		}
-		sb.WriteString(formatDataItem(LastColumnName, "string") + ");")
-		insertTimeseriesStatements[r-1] = sb.String()
-	}
-	err := fs.WriteTextLines(insertTimeseriesStatements, iot.DataFilePath+".iotdb.multiple.insert", false)
-	checkErr("SaveInsertStatements("+iot.DataFilePath+".iotdb.multiple.insert"+")", err)
-}
-
 // Expects comma-separated files. Assigns Dataset or Summary. REFACTOR
 func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) {
 	f, err := os.Open(filePath)
@@ -2621,8 +2697,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			checkErr("ExecuteBatchStatement(deleteStatements)", err)
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
-			// iot.SaveInsertStatements()   // can write multiple statements to disk for review, but execute single statement since that is faster.
-			// Automatically inserts long time column as first column (which should be UTC). Avoid returning huge result. Save in blocks.
+			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			const blockSize = 163840 // safe
 			nBlocks := len(iot.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
@@ -2659,9 +2734,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 					}
 					insert.WriteString(sb.String())
 				}
-				//insertStatement := []string{insert.String() + ";"}
-				/*err := fs.WriteTextLines(insertStatement, iot.DataFilePath+".iotdb.insert", false)
-				checkErr("WriteTextLines((insertStatement)", err) */
 				_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
 			}

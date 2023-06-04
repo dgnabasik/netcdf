@@ -5,12 +5,12 @@ go 1.20
 require (
 	github.com/apache/iotdb-client-go v1.1.7
 	github.com/dgnabasik/acmsearchlib/filesystem v0.0.0-20221129015018-185444387453
+	github.com/fhs/go-netcdf v1.2.1
+	golang.org/x/text v0.9.0
 )
 
 require (
 	github.com/apache/thrift v0.18.1 // indirect
-	github.com/batchatco/go-native-netcdf v0.0.0-20230103061018-5849c1f424b1 // indirect
-	github.com/batchatco/go-thrower v0.0.0-20200827035905-5cb7337f6be6 // indirect
 	github.com/bytedance/sonic v1.8.8 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20221115062448-fe3a3abad311 // indirect
 	github.com/dgnabasik/acmsearchlib/headers v0.0.0-20221129015018-185444387453 // indirect
@@ -34,7 +34,6 @@ require (
 	golang.org/x/crypto v0.9.0 // indirect
 	golang.org/x/net v0.10.0 // indirect
 	golang.org/x/sys v0.8.0 // indirect
-	golang.org/x/text v0.9.0 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

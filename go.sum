@@ -3,10 +3,6 @@ github.com/apache/iotdb-client-go v1.1.7/go.mod h1:3D6QYkqRmASS/4HsjU+U/3fscyc5M
 github.com/apache/thrift v0.15.0/go.mod h1:PHK3hniurgQaNMZYaCLEqXKsYK8upmhPbmdP2FXSqgU=
 github.com/apache/thrift v0.18.1 h1:lNhK/1nqjbwbiOPDBPFJVKxgDEGSepKuTh6OLiXW8kg=
 github.com/apache/thrift v0.18.1/go.mod h1:rdQn/dCcDKEWjjylUeueum4vQEjG2v8v2PqriUnbr+I=
-github.com/batchatco/go-native-netcdf v0.0.0-20230103061018-5849c1f424b1 h1:zmhMBDQci7mawn7nC+YMKpinHFBeYcOm0nI9qNcks4w=
-github.com/batchatco/go-native-netcdf v0.0.0-20230103061018-5849c1f424b1/go.mod h1:Eod1YI+B5CGpJDoAa+vRuhHZapFhetx6vlsMYD23g8c=
-github.com/batchatco/go-thrower v0.0.0-20200827035905-5cb7337f6be6 h1:gDf4IUqKDnH7F0XdgeYOBx2jlMKF/j9Xm42sISXpwqY=
-github.com/batchatco/go-thrower v0.0.0-20200827035905-5cb7337f6be6/go.mod h1:hJ9Ll7FOzcIr57sd7RHga7StcCVAL0vFBUsNpnGntNg=
 github.com/bytedance/sonic v1.5.0/go.mod h1:ED5hyg4y6t3/9Ku1R6dU/4KyJ48DZ4jPhfY1O2AihPM=
 github.com/bytedance/sonic v1.8.8 h1:Kj4AYbZSeENfyXicsYppYKO0K2YWab+i2UTSY7Ukz9Q=
 github.com/bytedance/sonic v1.8.8/go.mod h1:i736AoUSYt75HyZLoJW9ERYxcy6eaN6h4BZXU064P/U=
@@ -23,6 +19,8 @@ github.com/dgnabasik/acmsearchlib/headers v0.0.0-20221129015018-185444387453 h1:
 github.com/dgnabasik/acmsearchlib/headers v0.0.0-20221129015018-185444387453/go.mod h1:dFi6cFpmvdTn/hXbOcOS3o+BvpzawuukUNNuIBvQEyQ=
 github.com/dgnabasik/acmsearchlib/nulltime v0.0.0-20221129015018-185444387453 h1:ch9VQZyFAYOT5D6LeFWJDIlW+ryfEyDe9rNBQv28wjs=
 github.com/dgnabasik/acmsearchlib/nulltime v0.0.0-20221129015018-185444387453/go.mod h1:bWp8J4DLx6w1kcmuhfalRjpmTsG/I9CSxmwU2PxNyBs=
+github.com/fhs/go-netcdf v1.2.1 h1:Gdxo962yQtRNw6wJ2RRB693QmsMBngQRJN/v0UEP1Z8=
+github.com/fhs/go-netcdf v1.2.1/go.mod h1:msn14RWMjc966goHHzja4PTDaphTENRg2vo+3f27Wpg=
 github.com/gin-contrib/sse v0.1.0 h1:Y/yl/+YNO8GZSjAhjMsSuLt29uWRFHdHYUb5lYOV9qE=
 github.com/gin-contrib/sse v0.1.0/go.mod h1:RHrZQHXnP2xjPF+u1gW/2HnVO7nvIa9PG3Gm+fLHvGI=
 github.com/gin-gonic/gin v1.9.0 h1:OjyFBKICoexlu99ctXNR2gg+c5pKrKMuyjgARg9qeY8=
