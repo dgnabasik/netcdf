@@ -7,7 +7,7 @@ package main
 /* Datatype properties (attributes) relate individuals to literal data whereas object properties relate individuals to other individuals.
    Time series as a sequence of measurements, where each measurement is defined as an object with a value, a named event, and a metric. A time series object binds a metric to a resource.
    Use queries to get statistical Maximum, Minimum, Mean, StandardDeviation, Median, Mode.
-   Equivalent timeseries => owl:sameAs: hasUnit, hasEquation, hasDistribution.
+   Equivalent time series => owl:sameAs: hasUnit, hasEquation, hasDistribution.
    Produce json file, DatatypeProperty ontology file, and SPARQL query files file from ncdump outputs.
    Use Named Graphs (Identifier+Title+DatastreamName) as Publish/Subscribe topics?
    /usr/bin/ncdump -k cdf.nc			==> get file type {classic, netCDF-4, others...}
@@ -120,7 +120,7 @@ type IoTDbAccess struct {
 // Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
 func (iotAccess *IoTDbAccess) GetTimeseriesList() {
 	var timeout int64 = 1000
-	iotAccess.Sql = "show timeseries;"
+	iotAccess.Sql = "show time series;"
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 	if err == nil {
 		lines := printDataSet(sessionDataSet)
@@ -386,7 +386,7 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 func (cdf NetCDF) Format_Ontology() []string {
 	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
 	output := strings.Split(baseline, crlf)
-	output = append(output, `### specific timeseries DatatypeProperties`)
+	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0
 	for _, v := range cdf.Measurements {
 		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[v.MeasurementItem.MeasurementType] + crlf
@@ -558,16 +558,16 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	cdf.Measurements[LastColumnName] = mv
 }
 
-// Assume timeseries have been created; erase existing data; insert data. Assigns cdf.Dataset.
+// Assume time series have been created; erase existing data; insert data. Assigns cdf.Dataset.
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB(ncDatafilePath string) {
-	// Open the file; read each timeseries concurrently?
+	// Open the file; read each time series concurrently?
 	nc, err := netcdf.Open(ncDatafilePath)
 	if err != nil {
 		checkErr("Could not access "+ncDatafilePath, err)
 	}
 	defer nc.Close()
 
-	// Read every NetCDF variable to construct an aligned timeseries.
+	// Read every NetCDF variable to construct an aligned time series.
 	for _, item := range cdf.Measurements {
 		if item.MeasurementName == "id" || item.MeasurementName == "time" {
 			fmt.Println("Skipping " + item.MeasurementName)
@@ -576,7 +576,7 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB(ncDatafilePath string) {
 		fmt.Print(item.MeasurementName + "  " + item.MeasurementType + "  ")
 		vr, _ := nc.GetVariable(item.MeasurementName) //<<<< fails on string
 		if vr == nil {
-			checkErr(item.MeasurementName+" timeseries not found!", errors.New("nc.GetVariable"))
+			checkErr(item.MeasurementName+" time series not found!", errors.New("nc.GetVariable"))
 		}
 
 		// mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
@@ -679,11 +679,11 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 		}
 		defer cdf.IoTDbAccess.session.Close()
 	}
-	fmt.Println("Processing timeseries for dataset " + cdf.DatasetName + " ...")
+	fmt.Println("Processing time series for dataset " + cdf.DatasetName + " ...")
 
 	for _, command := range cdf.TimeseriesCommands {
 		switch command {
-		case "drop": // timeseries schema; uses single statement;
+		case "drop": // time series schema; uses single statement;
 			sql := "DROP TIMESERIES " + IotDatasetPrefix + cdf.DatasetName + ".*"
 			_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
@@ -691,7 +691,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 				delete(cdf.Measurements, k)
 			}
 
-		case "create": // create aligned timeseries schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
+		case "create": // create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
 			var sb strings.Builder
 			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix + cdf.DatasetName + "(")
 			for _, item := range cdf.Measurements {
@@ -1040,40 +1040,40 @@ func getBaselineOntology(identifier, title, description string) string {
 		// new common Classes
 		`###  ` + SarefEtsiOrg + SarefExtension + `StartTimeseries` + crlf +
 		`` + s4data + `StartTimeseries rdf:type owl:Class ;` + crlf +
-		` rdfs:comment "The start time of a timeseries shall be present."@en ;` + crlf +
-		` rdfs:label "start timeseries"@en ;` + crlf +
+		` rdfs:comment "The start time of a time series shall be present."@en ;` + crlf +
+		` rdfs:label "start time series"@en ;` + crlf +
 		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `StopTimeseries` + crlf +
 		`` + s4data + `StopTimeseries rdf:type owl:Class ;` + crlf +
-		` rdfs:comment "The stop time of a timeseries shall be present."@en ;` + crlf +
-		` rdfs:label "stop timeseries"@en ;` + crlf +
+		` rdfs:comment "The stop time of a time series shall be present."@en ;` + crlf +
+		` rdfs:label "stop time series"@en ;` + crlf +
 		` rdfs:subClassOf <http://www.w3.org/2006/time#TemporalEntity> ; .` + crlf +
 		crlf +
 		// new common ObjectProperty
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasEquation` + crlf +
 		`` + s4data + `hasEquation rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the entire timeseries dataset is represented by a type of equation such as {linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential}."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the entire time series dataset is represented by a type of equation such as {linear, quadratic, polynomial, exponential, radical, trigonometric, or partial differential}."@en ;` + crlf +
 		` rdfs:label "has equation"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasDistribution` + crlf +
 		`` + s4data + `hasDistribution rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the entire timeseries dataset is accurately represented by a type of discrete or continuous distribution such as {Uniform, Bernoulli, Binomial, Poisson; Normal, Student_t_test, Exponential, Gamma, Weibull}."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the entire time series dataset is accurately represented by a type of discrete or continuous distribution such as {Uniform, Bernoulli, Binomial, Poisson; Normal, Student_t_test, Exponential, Gamma, Weibull}."@en ;` + crlf +
 		` rdfs:label "has distribution"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isPriorTo` + crlf +
 		`` + s4data + `isPriorTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian prior to another dataset."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the time series dataset acts as a Bayesian prior to another dataset."@en ;` + crlf +
 		` rdfs:label "is Bayesian prior to "@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isPosteriorTo` + crlf +
 		`` + s4data + `isPosteriorTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset acts as a Bayesian posterior to another dataset."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the time series dataset acts as a Bayesian posterior to another dataset."@en ;` + crlf +
 		` rdfs:label "is Bayesian posterior to "@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `isComparableTo` + crlf +
 		`` + s4data + `isComparableTo rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:comment "A relationship indicating that the timeseries dataset can be logically compared to another dataset. Necessary condition: type of Units and type of Distribution must agree. Sufficient condition: type of Equation must agree."@en ;` + crlf +
+		` rdfs:comment "A relationship indicating that the time series dataset can be logically compared to another dataset. Necessary condition: type of Units and type of Distribution must agree. Sufficient condition: type of Equation must agree."@en ;` + crlf +
 		` rdfs:label "is comparable to "@en .` + crlf +
 		crlf +
 		// non-core ObjectProperty extension references:
@@ -1084,12 +1084,18 @@ func getBaselineOntology(identifier, title, description string) string {
 		` rdfs:comment "Data has time series measurements, a sequence taken at successive equally spaced points in time."@en ;` + crlf +
 		` rdfs:label "has time series measurement"@en .` + crlf +
 		crlf +
-		// new common DatatypeProperty
-		`###  ` + SarefEtsiOrg + SarefExtension + `isAlignedWithTimeseries` + crlf +
-		`` + s4data + `isAlignedWithTimeseries rdf:type owl:DatatypeProperty ;` + crlf +
+		// new common DatatypeProperties
+		`###  ` + SarefEtsiOrg + SarefExtension + `isRaw` + crlf +
+		`` + s4data + `isRaw rdf:type owl:DatatypeProperty ;` + crlf +
+		` rdfs:range xsd:boolean ;` + crlf +
+		` rdfs:comment "The time series has (not) been cleaned or curated."@en ;` + crlf +
+		` rdfs:label "is raw data set"@en .` + crlf +
+		crlf +
+		`###  ` + SarefEtsiOrg + SarefExtension + `isAlignedTimeseries` + crlf +
+		`` + s4data + `isAlignedTimeseries rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:string ;` + crlf +
-		` rdfs:comment "The name of the time sequence that the timeseries is aligned with."@en ;` + crlf +
-		` rdfs:label "is aligned with timeseries"@en .` + crlf +
+		` rdfs:comment "The name of the time sequence that the time series is aligned with."@en ;` + crlf +
+		` rdfs:label "is aligned time series"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasSamplingPeriodValue` + crlf +
 		`` + s4data + `hasSamplingPeriodValue rdf:type owl:DatatypeProperty ;` + crlf +
@@ -1100,13 +1106,13 @@ func getBaselineOntology(identifier, title, description string) string {
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasUpperLimitValue` + crlf +
 		`` + s4data + `hasUpperLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:float ;` + crlf +
-		` rdfs:comment "The highest value in the timeseries."@en ;` + crlf +
+		` rdfs:comment "The highest value in the time series."@en ;` + crlf +
 		` rdfs:label "has upper limit value"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasLowerLimitValue` + crlf +
 		`` + s4data + `hasLowerLimitValue rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:float ;` + crlf +
-		` rdfs:comment "The lowest value in the timeseries."@en ;` + crlf +
+		` rdfs:comment "The lowest value in the time series."@en ;` + crlf +
 		` rdfs:label "has lower limit value"@en .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + SarefExtension + `hasNumericPrecision` + crlf +
@@ -1399,9 +1405,9 @@ func main() {
 	case ".hd5":
 		LoadHd5SensorDataIntoDatabase(os.Args)
 	default:
-		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any timeseries command: {drop create delete insert example}.")
+		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any time series command: {drop create delete insert example}.")
 		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
-		fmt.Println("including a description.txt file. All timeseries data are placed under the database prefix: " + IotDataPrefix)
+		fmt.Println("including a description.txt file. All time series data are placed under the database prefix: " + IotDataPrefix)
 		fmt.Println("Required *.nc parameters: 1) path to single *.nc & *.var files, and 2) CDF file type {HDF5, netCDF-4, classic}.")
 		fmt.Println("  Optionally specify the unique dataset identifier; e.g. Entity_clean_5min")
 		os.Exit(0)
@@ -2147,7 +2153,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
 	var unitsOfMeasure = map[string]string{
 		"kW":     uomPrefix + "kilowatt",
-		"kWh":    uomPrefix + "kilowattHour", // timeseries (are these averaged values?)
+		"kWh":    uomPrefix + "kilowattHour",
 		"pascal": uomPrefix + "pascal",
 		"kelvin": uomPrefix + "kelvin",
 		"°C":     uomPrefix + "degreeCelsius",
@@ -2604,7 +2610,7 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) {
 func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
 	baseline := getBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description)
 	output := strings.Split(baseline, crlf)
-	output = append(output, `### specific timeseries DatatypeProperties`)
+	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0 // can't use ndx in range because the map is indexed by a string.
 	for _, v := range iot.Measurements {
 		ndx++
@@ -2655,7 +2661,7 @@ func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
 }
 
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
-// create timeseries root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
+// create time series root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
 // ProcessTimeseries() is the only place where iot.IoTDbAccess.session is instantiated and clientConfig is used.
 func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 	if iot.IoTDbAccess.ActiveSession {
@@ -2665,11 +2671,11 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 		}
 		defer iot.IoTDbAccess.session.Close()
 	}
-	fmt.Println("Processing timeseries for dataset " + iot.DatasetName + " ...")
+	fmt.Println("Processing time series for dataset " + iot.DatasetName + " ...")
 
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
-		case "drop": // timeseries schema; uses single statement;
+		case "drop": // time series schema; uses single statement;
 			sql := "DROP TIMESERIES " + IotDatasetPrefix + iot.DatasetName + ".*"
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
@@ -2677,7 +2683,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				delete(iot.Measurements, k)
 			}
 
-		case "create": // create aligned timeseries schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
+		case "create": // create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
 			var sb strings.Builder
 			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix + iot.DatasetName + "(")
 			for _, item := range iot.Measurements {
