@@ -708,8 +708,10 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 }
 
 // Assume time series have been created; erase existing data; insert data. Assigns cdf.Dataset.
+// mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() {
-	const createMsg string = " time series not found -- run this program with the create parameter first "
+	iotPrefix := IotDataPrefix + cdf.DatasetName + "."
+	const createMsg string = " time series not found -- run this program with the create parameter first " // also get this if no data in column
 	// Open the file; read each time series concurrently?
 	fileToRead := cdf.DataFilePath + "/" + cdf.DatasetName + ncExtension
 	nc, err := netcdf.OpenFile(fileToRead, netcdf.NOWRITE)
@@ -719,42 +721,46 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() {
 	defer nc.Close()
 
 	// Read every NetCDF variable to construct an aligned time series.
+	datasetSize := 8838720 // 	id = 990; time = 8928;
 	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 		for _, item := range cdf.Measurements {
-			/*if strings.ToLower(item.MeasurementName) == "longtime" || strings.ToLower(item.MeasurementName) == "id" {
+			/*if strings.ToLower(item.MeasurementName) == "Longtime" || strings.ToLower(item.MeasurementName) == "Id" {
 				fmt.Println("Skipping " + item.MeasurementName)
 				continue
 			}*/
 			if item.ColumnOrder == ndx {
-				vr, err := nc.Var(item.MeasurementName) //<<<< fails on string
-				checkErr(item.MeasurementName+createMsg, err)
+				vr, err := nc.Var(item.MeasurementName)
+				if err != nil {
+					fmt.Println(err)
+				}
+				//checkErr("["+iotPrefix+"]"+item.MeasurementName+createMsg, err)
+				fmt.Println(item.MeasurementName + "  " + item.MeasurementItem.MeasurementType) //<<<<
 
-				// mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
 				switch strings.ToLower(item.MeasurementItem.MeasurementType) {
 				case "decimal", "double":
-					data := []float64{}
+					data := make([]float64, datasetSize)
 					err := vr.ReadFloat64s(data)
-					checkErr(item.MeasurementName+createMsg, err)
-				case "unicode", "string": // char is a scalar in NetCDF and Go has no scalar character type. Scalar characters in NetCDF will be returned as strings of length one.
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+				case "unicode", "string": //<<<< char is a scalar in NetCDF and Go has no scalar character type. Scalar characters in NetCDF will be returned as strings of length one.
 					data := []byte{} // ReadBytes reads the entire variable v into data, which must have enough space for all the values (i.e. len(data) must be at least v.Len()).
 					err := vr.ReadBytes(data)
-					checkErr(item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
 				case "integer", "int", "int32":
-					data := []int32{}
+					data := make([]int32, datasetSize)
 					err := vr.ReadInt32s(data)
-					checkErr(item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
 				case "longint", "int64":
-					data := []int64{}
+					data := make([]int64, datasetSize)
 					err := vr.ReadInt64s(data)
-					checkErr(item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
 				case "float":
-					data := []float32{}
+					data := make([]float32, datasetSize)
 					err := vr.ReadFloat32s(data)
-					checkErr(item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
 				case "boolean":
-					data := []int8{}
-					err := vr.ReadInt8s(data)
-					checkErr(item.MeasurementName+createMsg, err)
+					data := make([]byte, datasetSize) // int8{}
+					err := vr.ReadBytes(data)         // ReadInt8s(data)
+					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
 				}
 			}
 		}
