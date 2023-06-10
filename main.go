@@ -47,8 +47,6 @@ import (
 
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/fhs/go-netcdf/netcdf"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 	//"github.com/dgnabasik/netcdf/graphdb"
 	//"github.com/dgnabasik/netcdf/iotdb"
 	//"github.com/relvacode/iso8601"
@@ -334,15 +332,6 @@ type NetCDF struct {
 	Dataset            [][]string `json:"dataset"` // actual data
 }
 
-// Some variable names must be aliased in SQL statements: {time, }
-func (cdf NetCDF) StandardNameAlias(standardName string) string {
-	if strings.ToLower(standardName) == "time" {
-		fmt.Println("longtime")
-		return "longtime"
-	}
-	return standardName
-}
-
 func (cdf NetCDF) ToString(outputVariables bool) string {
 	const sep = "\n"
 	var sb strings.Builder
@@ -406,23 +395,23 @@ func (cdf NetCDF) Format_Json() ([]string, error) {
 
 // CREATE TIMESERIES root.datasets.etsi.Entity_clean_5min.HVAC_Mode with datatype=INT32, encoding=RLE;
 // prefix: root.datasets.etsi.Entity_clean_5min
-func (cdf NetCDF) Format_DBcreate() []string {
+/*func (cdf NetCDF) Format_DBcreate() []string {
 	var cdfTypeMap = map[string]string{"string": "TEXT", "double": "DOUBLE", "int": "INT32", "int64": "INT64", "boolean": "BOOLEAN"} // map CDF to IotDB datatypes.
 	var encodeMap = map[string]string{"string": "PLAIN", "double": "RLE", "int": "RLE", "int64": "RLE", "boolean": "PLAIN"}
 	lines := make([]string, 0)
 	for _, tv := range cdf.Measurements { // Msg: 700: Error occurred while parsing SQL to physical plan: line 1:55 no viable alternative at input '.time'
-		str := "CREATE TIMESERIES " + cdf.Identifier + "." + cdf.StandardNameAlias(tv.MeasurementItem.MeasurementName) + " with datatype=" + cdfTypeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ", encoding=" + encodeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ";"
+		str := "CREATE TIMESERIES " + cdf.Identifier + "." + tv.MeasurementItem.MeasurementAlias + " with datatype=" + cdfTypeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ", encoding=" + encodeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ";"
 		lines = append(lines, str)
 	}
 	return lines
-}
+} */
 
 // return list of dataset column names.
 func (cdf NetCDF) FormattedColumnNames() string {
 	var sb strings.Builder
 	sb.WriteString("(")
 	for ndx := range cdf.Measurements {
-		sb.WriteString(cdf.StandardNameAlias(cdf.Measurements[ndx].MeasurementName) + ",")
+		sb.WriteString(cdf.Measurements[ndx].MeasurementAlias + ",")
 	}
 	str := sb.String()[0:len(sb.String())-1] + ")"
 	return str
@@ -587,39 +576,6 @@ func (cdf NetCDF) Format_Ontology() []string {
 	return output
 }
 
-// CSV output format is same as xsv output. Assigns cdf.Summary::[][]string and returns format suitable for file system.
-// summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "units"}
-func (cdf *NetCDF) OutputSummaryCsvFile() ([]string, error) {
-	xsdMap := map[string]string{"string": "Unicode", "float": "Float", "int": "Integer", "integer": "Integer", "int32": "Integer", "int64": "Longint", "longint": "Longint", "double": "Double", "unitless": "Unitless"}
-	csvLines := make([]string, 0)
-	csvLines = append(csvLines, strings.Join(summaryColumnNames, ","))
-	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
-		for _, v := range cdf.Measurements { // <<<< add calculated fields.
-			if v.ColumnOrder == ndx {
-				str := v.MeasurementName + "," + xsdMap[strings.ToLower(v.MeasurementItem.MeasurementType)] + ","
-				switch strings.ToLower(v.MeasurementItem.MeasurementType) {
-				case "decimal", "double":
-					str += "1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,"
-				case "unicode", "string":
-					str += "unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,unicode,"
-				case "integer", "int", "int32":
-					str += "1,1,1,1,1,1,1,1,1,1,"
-				case "longint", "int64":
-					str += "1000,1000,1000,1000,1000,1000,1000,1000,1000,1000,"
-				case "float":
-					str += "1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,1.0,"
-				case "boolean":
-					str += "1,1,1,1,1,1,1,1,1,1,"
-				}
-				csvLines = append(csvLines, str+v.MeasurementItem.MeasurementUnits)
-				break
-			}
-		}
-	}
-	csvLines = append(csvLines, "\\"+",,,,,,,,,,,,") // add dummy line
-	return csvLines, nil
-}
-
 // Expects comma-separated files. Assigns Dataset or Summary. REFACTOR
 func (cdf *NetCDF) ReadCsvFile(filePath string, isDataset bool) {
 	f, err := os.Open(filePath)
@@ -649,7 +605,7 @@ func (cdf *NetCDF) getDimensionMap() map[string]int {
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (cdf *NetCDF) XsvSummaryTypeMap() {
-	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "longint", "Double": "double"}
+	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "int64", "Double": "double"}
 	cdf.Measurements = make(map[string]MeasurementVariable, 0)
 	// get units column
 	unitsColumn := 0
@@ -720,47 +676,53 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() {
 	}
 	defer nc.Close()
 
-	// Read every NetCDF variable to construct an aligned time series.
-	datasetSize := 8838720 // 	id = 990; time = 8928;
+	// Read every NetCDF variable to construct an aligned time series.  For Jan_clean: id = 990; time = 8928 => datasetSize := 8838720
 	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 		for _, item := range cdf.Measurements {
-			/*if strings.ToLower(item.MeasurementName) == "Longtime" || strings.ToLower(item.MeasurementName) == "Id" {
-				fmt.Println("Skipping " + item.MeasurementName)
+			skipThis := strings.ToLower(item.MeasurementName) == "time" || strings.ToLower(item.MeasurementAlias) == "longtime" || strings.ToLower(item.MeasurementAlias) == "id"
+			if skipThis {
+				//fmt.Println("Skipping " + item.MeasurementAlias)
 				continue
-			}*/
+			}
 			if item.ColumnOrder == ndx {
-				vr, err := nc.Var(item.MeasurementName)
+				vr, err := nc.Var(item.MeasurementAlias) // nc names
 				if err != nil {
 					fmt.Println(err)
 				}
 				//checkErr("["+iotPrefix+"]"+item.MeasurementName+createMsg, err)
-				fmt.Println(item.MeasurementName + "  " + item.MeasurementItem.MeasurementType) //<<<<
-
+				// Get the length of the dimensions of this data column.
+				dims, err := vr.LenDims()
+				if err != nil {
+					fmt.Println(err)
+				}
+				fmt.Print(item.MeasurementAlias + "  " + item.MeasurementItem.MeasurementType + "  ") //<<<<
+				fmt.Println(dims)
+				datasetSize := dims[0] * dims[1] // outer; inner
 				switch strings.ToLower(item.MeasurementItem.MeasurementType) {
 				case "decimal", "double":
 					data := make([]float64, datasetSize)
 					err := vr.ReadFloat64s(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "unicode", "string": //<<<< char is a scalar in NetCDF and Go has no scalar character type. Scalar characters in NetCDF will be returned as strings of length one.
 					data := []byte{} // ReadBytes reads the entire variable v into data, which must have enough space for all the values (i.e. len(data) must be at least v.Len()).
 					err := vr.ReadBytes(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "integer", "int", "int32":
 					data := make([]int32, datasetSize)
 					err := vr.ReadInt32s(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "longint", "int64":
 					data := make([]int64, datasetSize)
 					err := vr.ReadInt64s(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "float":
 					data := make([]float32, datasetSize)
 					err := vr.ReadFloat32s(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "boolean":
 					data := make([]byte, datasetSize) // int8{}
 					err := vr.ReadBytes(data)         // ReadInt8s(data)
-					checkErr(iotPrefix+item.MeasurementName+createMsg, err)
+					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				}
 			}
 		}
@@ -838,15 +800,15 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 		case "create":
 			// create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
-			// Note: It is not currently supported to set an alias, tag,  attributes, or to set different compression for a group of aligned timeseries.
+			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
 			var sb strings.Builder
 			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix + cdf.DatasetName + "(")
 			for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 				for _, v := range cdf.Measurements {
 					if v.ColumnOrder == ndx {
-						dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType, true) // isAligned
-						sb.WriteString(v.MeasurementName + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ", ")
+						dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
+						sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 					}
 				}
 			}
@@ -974,6 +936,9 @@ func ParseVariableFile(varFile, filetype, dataSetIdentifier string, description,
 			tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), " ")
 			standardname := strings.TrimSpace(strings.Split(tokens[1], "(")[0])
 			standardname, aliasname := StandardName(standardname)
+			if aliasname == "=" {
+				continue
+			}
 			tmpVar := MeasurementVariable{}
 			tmpVar.MeasurementItem.MeasurementName = standardname
 			tmpVar.MeasurementItem.MeasurementAlias = aliasname
@@ -1475,16 +1440,11 @@ func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, er
 	checkErr("ParseVariableFile", err)
 	//fmt.Println(xcdf.ToString(true)) // true => output variables
 
-	/*<<< have to read data file first to collect statistics!
-	summaryLines, err := xcdf.OutputSummaryCsvFile()
-	checkErr("OutputSummaryCsvFile: ", err)
-	outputCsvFile := summaryPrefix + xcdf.DatasetName + csvExtension
-	err = WriteTextLines(summaryLines, xcdf.SummaryFilePath, false)
-	checkErr("WriteTextLines(csv)", err)
-	err = UploadFile(DataSetPrefix+outputCsvFile, summaryLines)
-	checkErr("UploadFile: "+DataSetPrefix+outputCsvFile, err)
-	*/
+	// move UploadFile() statements.
 	xcdf.ReadCsvFile(xcdf.SummaryFilePath, false) // isDataset: no, is summary
+	//err = UploadFile(DataSetPrefix+outputCsvFile, summaryLines)
+	//checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
+
 	xcdf.XsvSummaryTypeMap()
 
 	ontology := xcdf.Format_Ontology()
@@ -1493,11 +1453,11 @@ func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, er
 	err = UploadFile(DataSetPrefix+datasetName+serializationExtension, ontology)
 	checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
 
-	sparqlQuery := xcdf.Format_SparqlQuery()
+	/*sparqlQuery := xcdf.Format_SparqlQuery()
 	err = WriteTextLines(sparqlQuery, outputPath+sparqlExtension, false)
 	checkErr("WriteTextLines(sparql)", err)
 	err = UploadFile(DataSetPrefix+datasetName+sparqlExtension, sparqlQuery)
-	checkErr("UploadFile: "+DataSetPrefix+datasetName+sparqlExtension, err)
+	checkErr("UploadFile: "+DataSetPrefix+datasetName+sparqlExtension, err)*/
 
 	return xcdf, nil
 }
@@ -2455,13 +2415,19 @@ func formatDataItem(s, dataType string) string {
 }
 
 // Return quoted name and its alias. Alias: open brackets are replaced with underscore.
-// Need to handle 2 aliases being the same.  Handles some IotDB reserved keywords.
-// return MeasurementName, MeasurementAlias.
+// Does not handle 2 aliases being the same. Return MeasurementName, MeasurementAlias.
+// Some variable names must be aliased in SQL statements: {time, }
 func StandardName(oldName string) (string, string) {
-	newName := strings.TrimSpace(cases.Title(language.Und, cases.NoLower).String(oldName)) // uppercase first letter
+	//newName := strings.TrimSpace(cases.Title(language.Und, cases.NoLower).String(oldName)) // uppercase first letter
+	newName := strings.TrimSpace(oldName) // uppercase first letter
 	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
 	alias := strings.ReplaceAll(newName, " ", "")
 	alias = replacer.Replace(alias)
+
+	if strings.ToLower(newName) == "time" {
+		return newName, "longtime"
+	}
+
 	if newName != alias {
 		return alias, newName
 	} else {
@@ -2483,24 +2449,22 @@ func getStartTime(someTime string) (time.Time, error) {
 }
 
 // Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
-// (client.TSDataType, client.TSEncoding, client.TSCompressionType)
-func getClientStorage(dataColumnType string, isAligned bool) (string, string, string) {
+// (client.TSDataType, client.TSEncoding, client.TSCompressionType)  Make all compression SNAPPY
+func getClientStorage(dataColumnType string) (string, string, string) {
 	sw := strings.ToLower(dataColumnType)
-	if isAligned { // make all compression SNAPPY
-		switch sw {
-		case "decimal", "double":
-			return "DOUBLE", "GORILLA", "SNAPPY"
-		case "unicode", "string":
-			return "TEXT", "PLAIN", "SNAPPY"
-		case "integer", "int", "int32":
-			return "INT32", "GORILLA", "SNAPPY"
-		case "longint", "int64":
-			return "INT64", "GORILLA", "SNAPPY"
-		case "float":
-			return "FLOAT", "GORILLA", "SNAPPY"
-		case "boolean":
-			return "BOOLEAN", "RLE", "SNAPPY"
-		}
+	switch sw {
+	case "decimal", "double":
+		return "DOUBLE", "GORILLA", "SNAPPY"
+	case "unicode", "string":
+		return "TEXT", "PLAIN", "SNAPPY"
+	case "integer", "int", "int32":
+		return "INT32", "GORILLA", "SNAPPY"
+	case "longint", "int64":
+		return "INT64", "GORILLA", "SNAPPY"
+	case "float":
+		return "FLOAT", "GORILLA", "SNAPPY"
+	case "boolean":
+		return "BOOLEAN", "RLE", "SNAPPY"
 	}
 	return "TEXT", "PLAIN", "SNAPPY"
 }
@@ -2805,13 +2769,13 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 
 		case "create":
 			// create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.datasets.etsi.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
-			// Note: It is not currently supported to set an alias, tag,  attributes, or to set different compression for a group of aligned timeseries.
+			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
 			var sb strings.Builder
 			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix + iot.DatasetName + "(")
 			for _, item := range iot.Measurements {
-				dataType, encoding, compressor := getClientStorage(item.MeasurementType, true) // isAligned
-				sb.WriteString(item.MeasurementName + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ", ")
+				dataType, encoding, compressor := getClientStorage(item.MeasurementType)
+				sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
