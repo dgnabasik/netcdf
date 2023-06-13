@@ -76,6 +76,7 @@ const ( // these do not include trailing >
 	ncExtension            = ".nc"
 	crlf                   = "\n"
 	timeAlias              = "longtime"
+	blockSize              = 163840 //=20*8192 	131072=16*8192
 )
 
 var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
@@ -679,12 +680,11 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	cdf.Measurements[LastColumnName] = &mv
 }
 
-// Ensure that timestamp row is output first.
+// If there are no values at all in the block, IoTDB does not write the measurement, so get mismatch between number of INSERT field names and VALUES (e.g., HeatingEquipmentStage3_RunTime)
 func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	fileToRead := cdf.DataFilePath + "/csv/" + cdf.DatasetName + csvExtension
 	err := cdf.ReadCsvFile(fileToRead, true) // isDataset: yes
 	checkErr("cdf.ReadCsvFile ", err)
-	const blockSize = 163840 // safe
 	nBlocks := len(cdf.Dataset)/(blockSize) + 1
 	timeIndex := 1 // longtime
 	for block := 0; block < nBlocks; block++ {
@@ -695,14 +695,13 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		endRow := startRow + blockSize
 		if block == nBlocks-1 {
 			endRow = len(cdf.Dataset)
-			fmt.Println(endRow) //<<<
 		}
 		fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 		for r := startRow; r < endRow; r++ {
 			sb.Reset()
 			startTime, err := getStartTimeFromString(cdf.Dataset[r][timeIndex])
 			if err != nil {
-				fmt.Println(cdf.Dataset[r][timeIndex])
+				fmt.Println("Appears to be a bad time: " + cdf.Dataset[r][timeIndex])
 				break
 			}
 			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
@@ -721,8 +720,8 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 		checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-		//WriteStringToFile("/home/david/Documents/block1.txt", insert.String())
-		//os.Exit(0) //<<<<
+		//WriteStringToFile("/home/david/Downloads/block1.txt", insert.String())
+		//os.Exit(0)
 	}
 	return err
 }
@@ -858,7 +857,6 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
-			const blockSize = 163840 // safe=20*8192
 			timeIndex := 1
 			nBlocks := len(cdf.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
@@ -2833,7 +2831,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
-			const blockSize = 163840 // safe
 			timeIndex := 0
 			nBlocks := len(iot.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
