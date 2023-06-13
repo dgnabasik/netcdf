@@ -272,6 +272,21 @@ func WriteTextLines(lines []string, filePath string, appendData bool) error {
 	return err
 }
 
+func WriteStringToFile(filePath, str string) error {
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Printf("WriteStringToFile: %+v\n", err)
+		return err
+	}
+	defer file.Close()
+
+	if _, err := file.WriteString(str); err != nil {
+		log.Printf("WriteStringToFile: %+v\n", err)
+	}
+	fmt.Println("Wrote to file " + filePath)
+	return err
+}
+
 func GetTimeseriesCommands(programArgs []string) []string {
 	timeseriesCommands := make([]string, 0)
 	for ndx := range programArgs {
@@ -395,23 +410,9 @@ func (cdf NetCDF) Format_Json() ([]string, error) {
 	return lines, nil
 }
 
-// CREATE TIMESERIES root.datasets.etsi.Entity_clean_5min.HVAC_Mode with datatype=INT32, encoding=RLE;
-// prefix: root.datasets.etsi.Entity_clean_5min
-/*func (cdf NetCDF) Format_DBcreate() []string {
-	var cdfTypeMap = map[string]string{"string": "TEXT", "double": "DOUBLE", "int": "INT32", "int64": "INT64", "boolean": "BOOLEAN"} // map CDF to IotDB datatypes.
-	var encodeMap = map[string]string{"string": "PLAIN", "double": "RLE", "int": "RLE", "int64": "RLE", "boolean": "PLAIN"}
-	lines := make([]string, 0)
-	for _, tv := range cdf.Measurements { // Msg: 700: Error occurred while parsing SQL to physical plan: line 1:55 no viable alternative at input '.time'
-		str := "CREATE TIMESERIES " + cdf.Identifier + "." + tv.MeasurementItem.MeasurementAlias + " with datatype=" + cdfTypeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ", encoding=" + encodeMap[strings.ToLower(tv.MeasurementItem.MeasurementType)] + ";"
-		lines = append(lines, str)
-	}
-	return lines
-} */
-
 // Return list of dataset column names.
 func (cdf NetCDF) FormattedColumnNames() string {
 	var sb strings.Builder
-	sb.WriteString("(")
 	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 		for _, v := range cdf.Measurements {
 			if v.ColumnOrder == ndx {
@@ -419,7 +420,7 @@ func (cdf NetCDF) FormattedColumnNames() string {
 			}
 		}
 	}
-	str := sb.String()[0:len(sb.String())-1] + ")"
+	str := sb.String()[0:len(sb.String())-1] + " "
 	return str
 }
 
@@ -609,17 +610,17 @@ func (cdf *NetCDF) getDimensionMap() map[string]int {
 	return dimensionMap
 }
 
-func (cdf *NetCDF) SwapColumnOrder(colName1, colName2 string) error {
+/*func (cdf *NetCDF) SwapColumnOrder(colName1, colName2 string) error {
 	fmt.Println("Swapping " + colName1 + " with " + colName2)
 	index1 := cdf.Measurements[colName1].ColumnOrder
 	index2 := cdf.Measurements[colName2].ColumnOrder
 	cdf.Measurements[colName1].ColumnOrder = index2
 	cdf.Measurements[colName2].ColumnOrder = index1
 	return nil
-}
+}*/
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
-// len() only returns the length of the "external" array. This swaps the order of the ecobee "id" and "time" columns so that time is first.
+// len() only returns the length of the "external" array.
 func (cdf *NetCDF) XsvSummaryTypeMap() {
 	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "int64", "Double": "double"}
 	cdf.Measurements = make(map[string]*MeasurementVariable, 0)
@@ -659,10 +660,6 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 			cdf.Measurements[dataColumnName] = &mv // add to map using original name
 		}
 	}
-	// Swap the order of the ecobee "id" and "time" columns so that time is output first in the INSERT SERIES statement.
-	if strings.Contains(strings.ToLower(cdf.DataFilePath), "ecobee") {
-		cdf.SwapColumnOrder("id", "time")
-	}
 	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
 	mi := MeasurementItem{
 		MeasurementName:  LastColumnName,
@@ -689,24 +686,23 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	checkErr("cdf.ReadCsvFile ", err)
 	const blockSize = 163840 // safe
 	nBlocks := len(cdf.Dataset)/(blockSize) + 1
-
+	timeIndex := 1 // longtime
 	for block := 0; block < nBlocks; block++ {
 		var sb strings.Builder
 		var insert strings.Builder
-		insert.WriteString("INSERT INTO " + IotDatasetPrefix + cdf.DatasetName + " (" + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
-		startRow := 1
-		if block > 0 {
-			startRow = blockSize*block + 1
-		}
+		insert.WriteString("INSERT INTO " + IotDatasetPrefix + cdf.DatasetName + " (time," + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
+		startRow := blockSize*block + 1
 		endRow := startRow + blockSize
 		if block == nBlocks-1 {
 			endRow = len(cdf.Dataset)
+			fmt.Println(endRow) //<<<
 		}
 		fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 		for r := startRow; r < endRow; r++ {
 			sb.Reset()
-			startTime, err := getStartTime(cdf.Dataset[r][0])
+			startTime, err := getStartTimeFromString(cdf.Dataset[r][timeIndex])
 			if err != nil {
+				fmt.Println(cdf.Dataset[r][timeIndex])
 				break
 			}
 			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
@@ -725,6 +721,8 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 		checkErr("ExecuteNonQueryStatement(insertStatement)", err)
+		//WriteStringToFile("/home/david/Documents/block1.txt", insert.String())
+		//os.Exit(0) //<<<<
 	}
 	return err
 }
@@ -861,15 +859,13 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			const blockSize = 163840 // safe=20*8192
+			timeIndex := 1
 			nBlocks := len(cdf.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
 				var sb strings.Builder
 				var insert strings.Builder
-				insert.WriteString("INSERT INTO " + IotDatasetPrefix + cdf.DatasetName + " (time," + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
-				startRow := 1
-				if block > 0 {
-					startRow = blockSize*block + 1
-				}
+				insert.WriteString("INSERT INTO " + IotDatasetPrefix + cdf.DatasetName + " (time," + cdf.FormattedColumnNames() + " ALIGNED VALUES ")
+				startRow := blockSize*block + 1
 				endRow := startRow + blockSize
 				if block == nBlocks-1 {
 					endRow = len(cdf.Dataset)
@@ -877,9 +873,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 				fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime, err := getStartTime(cdf.Dataset[r][0])
+					startTime, err := getStartTimeFromLongint(cdf.Dataset[r][timeIndex])
 					if err != nil {
-						fmt.Println(cdf.Dataset[r][0]) //<<<
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
@@ -2256,7 +2251,8 @@ const (
 	summaryPrefix    = "summary_"
 	OutputLocation   = SarefEtsiOrg + "datasets/examples/" //<<< wrong
 	IotDatasetPrefix = "root.datasets.etsi."
-	TimeFormat       = "2006-01-02T15:04:05Z"          // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
+	TimeFormat       = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
+	TimeFormat1      = "2006-01-02 15:04:05"
 	TimeFormatNano   = "2006-01-02T15:04:05.000Z07:00" // preferred milliseconds version.
 	LastColumnName   = "DatasetName"
 )
@@ -2470,7 +2466,7 @@ func StandardName(oldName string) (string, string) {
 }
 
 // someTime can be either a long or a readable dateTime string.
-func getStartTime(someTime string) (time.Time, error) {
+func getStartTimeFromLongint(someTime string) (time.Time, error) {
 	isLong, err := strconv.ParseInt(someTime, 10, 64)
 	if err == nil {
 		return time.Unix(isLong, 0), err
@@ -2478,6 +2474,15 @@ func getStartTime(someTime string) (time.Time, error) {
 	t, err := time.Parse(TimeFormat, someTime)
 	if err != nil {
 		return time.Unix(isLong, 0), err
+	}
+	return t, nil
+}
+
+// Process: 2017-01-18 10:40:00
+func getStartTimeFromString(someTime string) (time.Time, error) {
+	t, err := time.Parse(TimeFormat1, someTime)
+	if err != nil {
+		return t, err
 	}
 	return t, nil
 }
@@ -2829,15 +2834,13 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			const blockSize = 163840 // safe
+			timeIndex := 0
 			nBlocks := len(iot.Dataset)/(blockSize) + 1
 			for block := 0; block < nBlocks; block++ {
 				var sb strings.Builder
 				var insert strings.Builder
 				insert.WriteString("INSERT INTO " + IotDatasetPrefix + iot.DatasetName + " (time," + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
-				startRow := 1
-				if block > 0 {
-					startRow = blockSize*block + 1
-				}
+				startRow := blockSize*block + 1
 				endRow := startRow + blockSize
 				if block == nBlocks-1 {
 					endRow = len(iot.Dataset)
@@ -2845,7 +2848,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime, err := getStartTime(iot.Dataset[r][0])
+					startTime, err := getStartTimeFromLongint(iot.Dataset[r][timeIndex])
 					if err != nil {
 						fmt.Println(iot.Dataset[r][0])
 						break
