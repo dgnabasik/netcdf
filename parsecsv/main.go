@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -46,13 +47,20 @@ func main() {
 		fmt.Println("Specify path to CSV file.")
 		os.Exit(1)
 	}
+	lastRow := 0
+	if len(os.Args) > 2 {
+		lastRow, _ = strconv.Atoi(os.Args[2])
+	}
 	lines, _ := ReadTextLines(os.Args[1], false)
 	columnNames := strings.Split(lines[0], ",")
 	columnValues := make(map[int]int, 0)
 	for ndx := 0; ndx < len(columnNames); ndx++ {
 		columnValues[ndx] = 0
 	}
-	for ndx := 1; ndx < len(lines); ndx++ {
+	if lastRow == 0 {
+		lastRow = len(lines)
+	}
+	for ndx := 1; ndx < lastRow; ndx++ {
 		tokens := strings.Split(lines[ndx], ",")
 		for ndx1 := 0; ndx1 < len(columnNames); ndx1++ {
 			if len(tokens[ndx1]) > 0 {

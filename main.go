@@ -75,7 +75,7 @@ const ( // these do not include trailing >
 	varExtension           = ".var"
 	ncExtension            = ".nc"
 	crlf                   = "\n"
-	timeAlias              = "longtime"
+	timeAlias              = "time1"
 	blockSize              = 163840 //=20*8192 	131072=16*8192
 )
 
@@ -308,6 +308,7 @@ type MeasurementItem struct {
 	MeasurementType  string `json:"measurementtype"`  // XSD data type
 	MeasurementUnits string `json:"measurementunits"`
 	ColumnOrder      int    `json:"columnorder"` // Column order from data file
+	Ignore           bool   `json:"ignore"`      // in case there is no data in the file
 }
 
 func (mi MeasurementItem) ToString() string {
@@ -416,7 +417,7 @@ func (cdf NetCDF) FormattedColumnNames() string {
 	var sb strings.Builder
 	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 		for _, v := range cdf.Measurements {
-			if v.ColumnOrder == ndx {
+			if v.ColumnOrder == ndx && !v.Ignore {
 				sb.WriteString(v.MeasurementAlias + ",")
 			}
 		}
@@ -567,7 +568,7 @@ func (cdf NetCDF) Format_Ontology() []string {
 	if ok {
 		for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 			for _, v := range cdf.Measurements { //
-				if v.ColumnOrder == ndx {
+				if v.ColumnOrder == ndx && !v.Ignore {
 					str := s4data + v.MeasurementName + ` "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)]
 					if v.ColumnOrder < len(cdf.Measurements)-1 {
 						str += ` ;`
@@ -611,15 +612,6 @@ func (cdf *NetCDF) getDimensionMap() map[string]int {
 	return dimensionMap
 }
 
-/*func (cdf *NetCDF) SwapColumnOrder(colName1, colName2 string) error {
-	fmt.Println("Swapping " + colName1 + " with " + colName2)
-	index1 := cdf.Measurements[colName1].ColumnOrder
-	index2 := cdf.Measurements[colName2].ColumnOrder
-	cdf.Measurements[colName1].ColumnOrder = index2
-	cdf.Measurements[colName2].ColumnOrder = index1
-	return nil
-}*/
-
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (cdf *NetCDF) XsvSummaryTypeMap() {
@@ -640,7 +632,11 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 			ndx1 = ndx
 			break
 		}
-		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // skip header row
+		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0])                                       // skip header row
+		ignore := cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0" // sum,min,max
+		if ignore {
+			fmt.Println("Ignoring empty data column " + dataColumnName)
+		}
 		theEnd := dataColumnName == "interpolated"
 		if !theEnd {
 			mi := MeasurementItem{
@@ -649,6 +645,7 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 				MeasurementType:  rowsXsdMap[cdf.Summary[ndx+1][1]],
 				MeasurementUnits: cdf.Summary[ndx+1][unitsColumn],
 				ColumnOrder:      ndx,
+				Ignore:           ignore,
 			}
 			dimIndex, _ := dimMap[dataColumnName]
 			mv := MeasurementVariable{
@@ -668,6 +665,7 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 		MeasurementType:  "string",
 		MeasurementUnits: "unitless",
 		ColumnOrder:      ndx1,
+		Ignore:           false,
 	}
 	dimIndex, _ := dimMap[LastColumnName]
 	mv := MeasurementVariable{
@@ -686,7 +684,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	err := cdf.ReadCsvFile(fileToRead, true) // isDataset: yes
 	checkErr("cdf.ReadCsvFile ", err)
 	nBlocks := len(cdf.Dataset)/(blockSize) + 1
-	timeIndex := 1 // longtime
+	timeIndex := 1 //<<< need to calculate
 	for block := 0; block < nBlocks; block++ {
 		var sb strings.Builder
 		var insert strings.Builder
@@ -705,9 +703,9 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 				break
 			}
 			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-			for c := 0; c < len(cdf.Dataset[r])-1; c++ {
+			for c := 0; c < len(cdf.Dataset[r]); c++ {
 				for _, item := range cdf.Measurements {
-					if item.ColumnOrder == c {
+					if item.ColumnOrder == c && !item.Ignore {
 						sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementItem.MeasurementType) + ",")
 					}
 				}
@@ -720,7 +718,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 		checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-		//WriteStringToFile("/home/david/Downloads/block1.txt", insert.String())
+		//WriteStringToFile(HomeDirectory+"Downloads/block1.txt", insert.String())
 		//os.Exit(0)
 	}
 	return err
@@ -740,13 +738,13 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 
 	// Read every NetCDF variable to construct an aligned time series.  For Jan_clean: id = 990; time = 8928 => datasetSize := 8838720
 	for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
-		for _, item := range cdf.Measurements { // the var file contains all id and time values! LastColumnName values do not exist in any *.nc data file.
-			skipThis := item.MeasurementName == LastColumnName || strings.ToLower(item.MeasurementName) == "time" || strings.ToLower(item.MeasurementAlias) == timeAlias || strings.ToLower(item.MeasurementAlias) == "id"
+		for _, item := range cdf.Measurements { // LastColumnName values do not exist in any *.nc data file.
+			/*skipThis := item.MeasurementName == LastColumnName || strings.ToLower(item.MeasurementName) == "time" || strings.ToLower(item.MeasurementAlias) == timeAlias || strings.ToLower(item.MeasurementAlias) == "id"
 			if skipThis {
 				//fmt.Println("Skipping " + item.MeasurementAlias)
 				continue
-			}
-			if item.ColumnOrder == ndx {
+			}*/
+			if item.ColumnOrder == ndx && !item.Ignore {
 				vr, err := nc.Var(item.MeasurementAlias) // nc names
 				if err != nil {
 					fmt.Println(err)
@@ -795,11 +793,6 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 				}
 			}
 		}
-		/*for c := 0; c < len(cdf.Dataset[r])-1; c++ {
-			if item.ColumnOrder == c {
-				sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementItem.MeasurementType) + ",")
-			}
-		}*/
 	}
 	return nil
 }
@@ -833,7 +826,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix + cdf.DatasetName + "(")
 			for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 				for _, v := range cdf.Measurements {
-					if v.ColumnOrder == ndx {
+					if v.ColumnOrder == ndx && !v.Ignore {
 						dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
 						sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
 					}
@@ -842,8 +835,6 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 			_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
-			//err = cdf.CopyNcTimeseriesDataIntoIotDB()
-			//checkErr("CopyNcTimeseriesDataIntoIotDB()", err)
 			err = cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
 
@@ -876,9 +867,9 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-					for c := 0; c < len(cdf.Dataset[r])-1; c++ {
+					for c := 0; c < len(cdf.Dataset[r]); c++ {
 						for _, item := range cdf.Measurements {
-							if item.ColumnOrder == c {
+							if item.ColumnOrder == c && !item.Ignore {
 								sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementItem.MeasurementType) + ",")
 							}
 						}
@@ -2675,7 +2666,11 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 			ndx1 = ndx
 			break
 		}
-		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // skip header row
+		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0])                                       // skip header row
+		ignore := iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][4] == "0" // sum,min,max
+		if ignore {
+			fmt.Println("Ignoring empty data column " + dataColumnName)
+		}
 		theEnd := dataColumnName == "interpolated"
 		if !theEnd {
 			mi := MeasurementItem{
@@ -2684,6 +2679,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 				MeasurementType:  rowsXsdMap[iot.Summary[ndx+1][1]],
 				MeasurementUnits: iot.Summary[ndx+1][unitsColumn],
 				ColumnOrder:      ndx,
+				Ignore:           ignore,
 			}
 			iot.Measurements[dataColumnName] = mi // add to map using original name
 		}
@@ -2695,6 +2691,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		MeasurementType:  "string",
 		MeasurementUnits: "unitless",
 		ColumnOrder:      ndx1,
+		Ignore:           false,
 	}
 	iot.Measurements[LastColumnName] = mi
 }
@@ -2704,7 +2701,7 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 	var sb strings.Builder
 	for ndx := 0; ndx < len(iot.Measurements); ndx++ {
 		for _, item := range iot.Measurements {
-			if item.ColumnOrder == ndx {
+			if item.ColumnOrder == ndx && !item.Ignore {
 				sb.WriteString(item.MeasurementName + ",")
 			}
 		}
@@ -2769,7 +2766,7 @@ func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
 	if ok {
 		for ndx := 0; ndx < len(iot.Measurements); ndx++ {
 			for _, v := range iot.Measurements {
-				if v.ColumnOrder == ndx {
+				if v.ColumnOrder == ndx && !v.Ignore {
 					str := s4data + v.MeasurementName + `  "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementType)]
 					if v.ColumnOrder < len(iot.Measurements)-1 {
 						str += ` ;`
@@ -2851,9 +2848,9 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-					for c := 0; c < len(iot.Dataset[r])-1; c++ {
+					for c := 0; c < len(iot.Dataset[r]); c++ {
 						for _, item := range iot.Measurements {
-							if item.ColumnOrder == c {
+							if item.ColumnOrder == c && !item.Ignore {
 								sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
 							}
 						}
