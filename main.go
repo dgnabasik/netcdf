@@ -304,7 +304,7 @@ func IotDatasetPrefix(device string) string {
 	if device == "" {
 		return prefix + "device."
 	}
-	return prefix + device + "."
+	return prefix + device
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -320,7 +320,11 @@ type MeasurementItem struct {
 }
 
 func (mi MeasurementItem) ToString() string {
-	return mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
+	str := mi.MeasurementName + " : " + mi.MeasurementAlias + " : " + mi.MeasurementType + " : " + mi.MeasurementUnits
+	if mi.Ignore {
+		str += " : IGNORED!"
+	}
+	return str
 }
 
 // Expects the parameters to every Variable to be all the (2) dimensions (except for the dimension variables).
@@ -687,19 +691,21 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 }
 
 // If there are no values at all in the block, IoTDB does not write the measurement, so get mismatch between number of INSERT field names and VALUES (e.g., HeatingEquipmentStage3_RunTime)
+// Ids are consecutive: data rows = 8838720; 990 distinct id values; ==> 8928 rows per id-device
 func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	fileToRead := cdf.DataFilePath + "/csv/" + cdf.DatasetName + csvExtension
 	err := cdf.ReadCsvFile(fileToRead, true) // isDataset: yes
 	checkErr("cdf.ReadCsvFile ", err)
-	nBlocks := len(cdf.Dataset)/(blockSize) + 1
-	timeIndex := 1 //<<< need to calculate
+	nBlocks := cdf.Dimensions["id"]     //=990	 len(cdf.Dataset)/(blockSize) + 1
+	blockSize := cdf.Dimensions["time"] // scope override
+	timeIndex := 1                      //<<< need to calculate
 	fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
 	for block := 0; block < nBlocks; block++ {
 		fmt.Print(block + 1)
-		fmt.Print(" ") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
+		fmt.Print(" ")
 		var sb strings.Builder
 		var insert strings.Builder
-		insert.WriteString("INSERT INTO " + IotDatasetPrefix(cdf.DatasetName) + " (time," + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
+		insert.WriteString("INSERT INTO " + IotDatasetPrefix(cdf.DatasetName+"."+cdf.HouseIndices[block]) + " (time," + cdf.FormattedColumnNames() + ") ALIGNED VALUES ")
 		startRow := blockSize*block + 1
 		endRow := startRow + blockSize
 		if block == nBlocks-1 {
@@ -728,7 +734,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 		checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-		//WriteStringToFile(HomeDirectory+"Downloads/block1.txt", insert.String())
+		//WriteStringToFile(HomeDirectory+"Downloads/block" + strconv.Itoa(block) + ".txt", insert.String())
 	}
 	fmt.Println()
 	return err
@@ -804,7 +810,7 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	return nil
 }
 
-// Looks the same as the iot version!
+// Similar to the iot version but not the same. REFACTOR
 func (cdf *NetCDF) ProcessTimeseries() error {
 	if cdf.IoTDbAccess.ActiveSession {
 		cdf.IoTDbAccess.session = client.NewSession(clientConfig)
@@ -830,20 +836,25 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
 			var sb strings.Builder
-			sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix(cdf.DatasetName) + "(") //<<<<
-			for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
-				for _, v := range cdf.Measurements {
-					if v.ColumnOrder == ndx && !v.Ignore {
-						dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
-						sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
+			var sql string
+			// Use each id as a 'device'; read from var file; are unique.
+			for id := 0; id < len(cdf.HouseIndices); id++ {
+				sb.Reset()
+				sb.WriteString("CREATE ALIGNED TIMESERIES " + IotDatasetPrefix(cdf.DatasetName+"."+cdf.HouseIndices[id]) + "(")
+				for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
+					for _, v := range cdf.Measurements {
+						if v.ColumnOrder == ndx && !v.Ignore {
+							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
+							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
+						}
 					}
 				}
+				sql = sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
+				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
+				checkErr("ExecuteNonQueryStatement(createStatement)", err)
 			}
-			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
-			checkErr("ExecuteNonQueryStatement(createStatement)", err)
-			err = cdf.CopyCsvTimeseriesDataIntoIotDB()
-			checkErr("ExecuteNonQueryStatement(createStatement)", err)
+			fmt.Print("Created 'id-Devices' for " + cdf.DatasetName + ": ")
+			fmt.Println(len(cdf.HouseIndices))
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			deleteStatements := make([]string, 0)
@@ -855,44 +866,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
-			timeIndex := 1
-			nBlocks := len(cdf.Dataset)/(blockSize) + 1
-			fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
-			for block := 0; block < nBlocks; block++ {
-				fmt.Print(block + 1)
-				fmt.Print(" ") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
-				var sb strings.Builder
-				var insert strings.Builder
-				insert.WriteString("INSERT INTO " + IotDatasetPrefix(cdf.DatasetName) + " (time," + cdf.FormattedColumnNames() + " ALIGNED VALUES ")
-				startRow := blockSize*block + 1
-				endRow := startRow + blockSize
-				if block == nBlocks-1 {
-					endRow = len(cdf.Dataset)
-				}
-				for r := startRow; r < endRow; r++ {
-					sb.Reset()
-					startTime, err := getStartTimeFromLongint(cdf.Dataset[r][timeIndex])
-					if err != nil {
-						break
-					}
-					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-					for c := 0; c < len(cdf.Dataset[r]); c++ {
-						for _, item := range cdf.Measurements {
-							if item.ColumnOrder == c && !item.Ignore {
-								sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementItem.MeasurementType) + ",")
-							}
-						}
-					}
-					sb.WriteString(formatDataItem(cdf.DatasetName, "string") + ")")
-					if r < endRow-1 {
-						sb.WriteString(",")
-					}
-					insert.WriteString(sb.String())
-				}
-				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
-				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-			}
-			fmt.Println()
+			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
+			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 
 		case "query":
 			cdf.GetTimeseriesList(cdf.DatasetName)
@@ -1065,53 +1040,8 @@ func ParseVariableFile(varFile, filetype, dataSetIdentifier string, description,
 	}
 
 	lineIndex = lineIndex + 2
-	//xcdf.HouseIndices = make([]string, xcdf.Dimensions["id"])
-	//xcdf.LongtimeIndices = make([]string, xcdf.Dimensions["t ime"])
 	xcdf.HouseIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["id"], lineIndex, lines)
 	xcdf.LongtimeIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["time"], lineIndex, lines)
-	lineIndex++
-
-	/* dimIndex := 0
-	for lineIndex < len(lines) {
-		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
-			break
-		}
-		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
-		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
-			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
-		}
-		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			xcdf.HouseIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(xcdf.HouseIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(xcdf.HouseIndices[dimIndex], "=")
-				xcdf.HouseIndices[dimIndex] = tok2[1]
-			}
-			dimIndex++
-		}
-		lineIndex++
-	}
-
-	lineIndex++
-	dimIndex = 0
-	for lineIndex < len(lines) {
-		if len(strings.TrimSpace(lines[lineIndex])) == 0 {
-			break
-		}
-		tokens := strings.Split(strings.TrimSpace(lines[lineIndex]), ",")
-		if len(tokens) == 1 { // last element terminated by semi-colon; no comma.
-			tokens = strings.Split(strings.TrimSpace(lines[lineIndex]), ";")
-		}
-		for ndx := 0; ndx < len(tokens)-1; ndx++ {
-			xcdf.LongtimeIndices[dimIndex] = prettifyString(tokens[ndx])
-			if strings.Contains(xcdf.LongtimeIndices[dimIndex], "=") { // remove variable names
-				tok2 := strings.Split(xcdf.LongtimeIndices[dimIndex], "=")
-				xcdf.LongtimeIndices[dimIndex] = tok2[1]
-			}
-			dimIndex++
-		}
-		lineIndex++
-	} */
-
 	return xcdf, nil
 }
 
@@ -1394,7 +1324,7 @@ func parseDimensionIndices(nDimensions, lineIndex int, lines []string) ([]string
 			output[dimIndex] = prettifyString(tokens[ndx])
 			if strings.Contains(output[dimIndex], "=") { // remove variable names
 				tok2 := strings.Split(output[dimIndex], "=")
-				output[dimIndex] = tok2[1]
+				output[dimIndex] = strings.TrimSpace(tok2[1])
 			}
 			dimIndex++
 		}
@@ -2593,6 +2523,7 @@ func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvD
 	err := iotdbDataFile.ReadCsvFile(iotdbDataFile.SummaryFilePath, false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	iotdbDataFile.XsvSummaryTypeMap()
+	//fmt.Println(iotdbDataFile.OutputDescription(true))
 	//<<< read sensor data from IotDB if available, else CSV file.
 	err = iotdbDataFile.ReadCsvFile(iotdbDataFile.DataFilePath, true) // isDataset: yes
 	checkErr("ReadCsvFile ", err)
@@ -2608,11 +2539,15 @@ func (iot *IoTDbCsvDataFile) OutputDescription(displayColumnInfo bool) string {
 	sb.WriteString("Data Path       : " + iot.DataFilePath + crlf)
 	sb.WriteString("n Data Types    : " + strconv.Itoa(len(iot.Measurements)) + crlf)
 	sb.WriteString("n Measurements  : " + strconv.Itoa(len(iot.Dataset)-1) + crlf)
-	sb.WriteString("Data start time : " + iot.Dataset[1][0] + crlf)
-	sb.WriteString("Data end time   : " + iot.Dataset[len(iot.Dataset)-1][0] + crlf)
+	//sb.WriteString("Data start time : " + iot.Dataset[1][0] + crlf)
+	//sb.WriteString("Data end time   : " + iot.Dataset[len(iot.Dataset)-1][0] + crlf)
 	if displayColumnInfo {
-		for _, item := range iot.Measurements {
-			sb.WriteString("  " + item.ToString() + crlf)
+		for ndx := 0; ndx < len(iot.Measurements); ndx++ {
+			for _, item := range iot.Measurements {
+				if item.ColumnOrder == ndx && !item.Ignore {
+					sb.WriteString("  " + item.ToString() + crlf)
+				}
+			}
 		}
 	}
 	return sb.String()
@@ -2711,7 +2646,7 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 	for ndx := 0; ndx < len(iot.Measurements); ndx++ {
 		for _, item := range iot.Measurements {
 			if item.ColumnOrder == ndx && !item.Ignore {
-				sb.WriteString(item.MeasurementName + ",")
+				sb.WriteString(item.MeasurementAlias + ",")
 			}
 		}
 	}
@@ -2859,11 +2794,11 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 					sb.Reset()
 					startTime, err := getStartTimeFromLongint(iot.Dataset[r][timeIndex])
 					if err != nil {
-						fmt.Println(iot.Dataset[r][0])
+						fmt.Println(iot.Dataset[r][timeIndex])
 						break
 					}
 					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
-					for c := 0; c < len(iot.Dataset[r]); c++ {
+					for c := 0; c < len(iot.Dataset[r])-1; c++ { // skip DatasetName; <<< use Ignore.
 						for _, item := range iot.Measurements {
 							if item.ColumnOrder == c && !item.Ignore {
 								sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
@@ -2878,6 +2813,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 				_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
+				//WriteStringToFile(HomeDirectory+"Downloads/block"+strconv.Itoa(block)+".txt", insert.String())
 			}
 			fmt.Println()
 
