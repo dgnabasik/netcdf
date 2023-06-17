@@ -53,12 +53,6 @@ import (
 	//"github.com/relvacode/iso8601"
 )
 
-/* iso8601.Time can be used as a drop-in replacement for time.Time with JSON responses
-type ExternalAPIResponse struct {
-	Timestamp *iso8601.Time
-}
-t, err := iso8601.ParseString("2020-01-02T16:20:00")  */
-
 const ( // these do not include trailing >
 	HomeDirectory          = "/home/david/" // davidgnabasik
 	CurrentVersion         = "v1.0.1/"
