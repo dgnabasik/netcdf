@@ -3,7 +3,7 @@ package main
 // Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
 // Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
 // IotDB Data Model: https://iotdb.apache.org/UserGuide/Master/Data-Concept/Data-Model-and-Terminology.html
-// https://saref.etsi.org/saref4data/v1.0.1/datasets/
+// GraphDB base IRI: https://saref.etsi.org/saref4data/v1.0.1/datasets/
 /* Datatype properties (attributes) relate individuals to literal data whereas object properties relate individuals to other individuals.
    Time series as a sequence of measurements, where each measurement is defined as an object with a value, a named event, and a metric.
    A time series object binds a metric to a resource.
@@ -72,7 +72,7 @@ const ( // these do not include trailing >
 	blockSize              = 163840 //=20*8192 	131072=16*8192
 )
 
-var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "int64": "integer", "float": "float", "double": "double", "decimal": "double", "byte": "boolean"} // map cdf to xsd datatypes.
+var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
