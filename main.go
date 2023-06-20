@@ -634,7 +634,6 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
 		if cdf.Summary[ndx+1][0] == "interpolated" || len(cdf.Summary[ndx+1][0]) < 2 {
 			cdf.GroupName = cdf.Summary[ndx+1][1]
-			fmt.Println(cdf.GroupName) //<<<
 			ndx1 = ndx
 			break
 		}
@@ -1039,30 +1038,121 @@ func ParseVariableFile(varFile, filetype, dataSetIdentifier string, description,
 	return xcdf, nil
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////
+var EntityCommentMap = map[string]string{
+	"ic-data:DataPoint": "A data point is a quantity that is extended with various pieces of process information, namely \n" +
+		" - A creation time (instant). This is the point in time when the data point was created, which is not necessarily the time for which it is valid. In the case of soft-sensors or forecasters, a data point might have been created ahead of time, in the case of a direcet measurement a data point might created at its time of validity (or at the end of its validity time interval) and in the case of an archived value the data point might have been created after the fact.\n" +
+		" - A validity time (temporal entity) which will be named 'time stamp'. The validity time is the instant or interval in time in which a specific quantity is in effect. For example a room temperature might be measured at 12:00, which means it is in effect at this very instant. A specific amount of energy might me expended within the time-slot between 12:30 and 12:45, which means that the energy measurement is in effect during this time interval.\n" +
+		" - A location or topological association. For example, a measurement might be taken in a specific room, a power avarage might have been measured by a specific meter, a forecast might be valid for a specific region or grid segment. This association is therefore not always a location.",
+	"ic-data:TimeSeries":            "An ordered sequence of data points of a quantity observed at spaced time intervals is referred to as a time series. Time series can be a result of prediction algorithm.",
+	"ic-data:Usage":                 "The usage of a datapoint, time series or message.",
+	"ic-data:hasEffectivePeriod":    "This connects to the temporal entity which describes when (time interval) the quantity of this data point was, is, or will be in effect. This is the time interval which is covered by the forecast. This should be equivalent to the time interval covered by the time-series that express the forecast.",
+	"ic-data:hasUsage":              "This property provides the possibility to add some additional information about the usage of a data-point or time-series. For example, a data point or time series can be used as an upper limit, lower limit or a baseline, a maximum versus minimum value, or a consumption versus a production value.",
+	"ic-data:hasDataPoint":          "This relationship connects a time series to data point.",
+	"ic-data:hasCreationTime":       "The time instant that defines the creation time of a data point or quantity or forecast or similar entities. This is not the same as the time at which the quantity is in effect. For example, if a temperature is forecasted today at 12:30 (creation time of the forecast) for the following day at 14:45 (time when the temperature is expected to be in effect), the this instant should be 12:30 of today. A creation time (instant). This is the point in time when the data point was created, which is not necessarily the time for which it is valid. In the case of soft-sensors or forecasters, a data point might have been created ahead of time, in the case of a direcet measurement a data point might created at its time of validity (or at the end of its validity time interval) and in the case of an archived value the data point might have been created after the fact.",
+	"ic-data:hasTemporalResolution": "The resolution is the distance between two measurement time-stapms. This only makes sense if the measurements are equidistant.",
+	"ic-data:hasUpdateRate":         "The rate at which a data point or time-series or forecast or other data entity is being updated.",
+	"saref:Measurement":             "???",
+	"saref:UnitOfMeasure":           "???",
+	"s4envi:FrequencyUnit":          "???",
+	"s4envi:FrequencyMeasurement":   "???",
+	"s4auto/Confidence":             "???",
+}
 
+///////////////////////////////////////////////////////////////////////////////////////////
+/* ###  http://ontology.tno.nl/interconnect/datapoint#TimeSeries
+ic-data:TimeSeries rdf:type owl:Class ;
+                   rdfs:subClassOf [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasEffectivePeriod ;
+                                     owl:allValuesFrom time:Interval
+                                   ] ,
+                                   [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasUsage ;
+                                     owl:allValuesFrom ic-data:Usage
+                                   ] ,
+                                   [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasDataPoint ;
+                                     owl:minQualifiedCardinality "0"^^xsd:nonNegativeInteger ;
+                                     owl:onClass ic-data:DataPoint
+                                   ] ,
+                                   [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasCreationTime ;
+                                     owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+                                     owl:onClass time:Instant
+                                   ] ,
+                                   [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasTemporalResolution ;
+                                     owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+                                     owl:onClass time:TemporalDuration
+                                   ] ,
+                                   [ rdf:type owl:Restriction ;
+                                     owl:onProperty ic-data:hasUpdateRate ;
+                                     owl:maxQualifiedCardinality "1"^^xsd:nonNegativeInteger ;
+                                     owl:onClass time:TemporalDuration
+                                   ] ;
+-------------------------------------------------------------------
+ObjectProperty::
+ic-data:hasEffectivePeriod rdf:type owl:ObjectProperty ;
+    rdfs:range time:TemporalEntity ;
+    rdfs:comment """This connects to the temporal entity which describes when (time interval) the quantity of this data point was, is, or will be in effect. This is the time interval which is covered by the forecast.
+This should be equivalent to the time interval covered by the time-series that express the forecast. *A potential application of SHACL?*""" ;
+
+ic-data:hasUsage rdf:type owl:ObjectProperty ;
+    rdfs:range ic-data:Usage ;
+    rdfs:comment "This property provides the possibility to add some additional information about the usage of a data-point or time-series. For example, a data point or time series can be used as an upper limit, lower limit or a baseline, a maximum versus minimum value, or a consumption versus a production value."@en ;
+
+ic-data:hasDataPoint rdf:type owl:ObjectProperty ;
+    rdfs:domain ic-data:TimeSeries ;
+    rdfs:range ic-data:DataPoint ;
+    rdfs::comment "This relationship connects a time series to data point."@en ;
+
+ic-data:hasCreationTime rdf:type owl:ObjectProperty ;
+    rdfs:range time:Instant ;
+    rdfs:comment """The time instant that defines the creation time of a data point or quantity or forecast or similar entities. This is not the same as the time at which the quantity is in effect. For example, if a temperature is forecasted today at 12:30 (creation time of the forecast) for the following day at 14:45 (time when the temperature is expected to be in effect), the this instant should be 12:30 of today.
+A creation time (instant). This is the point in time when the data point was created, which is not necessarily the time for which it is valid. In the case of soft-sensors or forecasters, a data point might have been created ahead of time, in the case of a direcet measurement a data point might created at its time of validity (or at the end of its validity time interval) and in the case of an archived value the data point might have been created after the fact."""@en ;
+
+ic-data:hasTemporalResolution rdf:type owl:ObjectProperty ;
+	rdfs:range time:TemporalDuration ;
+    rdfs:comment "The resolution is the distance between two measurement time-stapms. This only makes sense if the measurements are equidistant." ;
+
+###  http://ontology.tno.nl/interconnect/datapoint#hasUpdateRate
+ic-data:hasUpdateRate rdf:type owl:ObjectProperty ;
+	rdfs:range time:TemporalDuration ;
+    rdfs:comment """The rate at which a data point or time-series or forecast or other data entity is being updated.
+
+Classes::
+ic-data:Usage rdf:type owl:Class ;
+	rdfs:comment "The usage of a datapoint, time series or message."@en ;
+
+ic-data:DataPoint rdf:type owl:Class ;
+	rdfs:subClassOf saref:Measurement ,
+    rdfs:comment """A data point is a quantity that is extended with various pieces of process information, namely
+ 	  - A creation time (instant). This is the point in time when the data point was created, which is not necessarily the time for which it is valid. In the case of soft-sensors or forecasters, a data point might have been created ahead of time, in the case of a direcet measurement a data point might created at its time of validity (or at the end of its validity time interval) and in the case of an archived value the data point might have been created after the fact.
+	  - A validity time (temporal entity) which will be named \"time stamp\". The validity time is the instant or interval in time in which a specific quantity is in effect. For example a room temperature might be measured at 12:00, which means it is in effect at this very instant. A specific amount of energy might me expended within the time-slot between 12:30 and 12:45, which means that the energy measurement is in effect during this time interval.
+	  - A location or topological association. For example, a measurement might be taken in a specific room, a power avarage might have been measured by a specific meter, a forecast might be valid for a specific region or grid segment. This association is therefore not always a location."""@en ;
+
+*/
+
+//	@prefix org: <https://schema.org/> //
+//
+// Excluded "s4ehaw:MeasurementFunction": ,
+// Excluded "s4ehaw:Data rdf:type owl:Class .` + crlf +
 // Excluded "rdf:type owl:Restriction owl:onProperty saref:measurementMadeBy owl:someValuesFrom saref:Device" because don't know Device.
 func getBaselineOntology(identifier, title, description string) string {
 	return `@prefix ` + s4data + ` <` + DataSetPrefix + `> .` + crlf +
 		`@prefix ex: <` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
-		`@prefix foaf: <http://xmlns.com/foaf/spec/#> .` + crlf +
-		`@prefix geosp: <http://www.opengis.net/ont/geosparql#> .` + crlf +
-		`@prefix obo: <http://purl.obolibrary.org/obo/> .` + crlf +
-		`@prefix org: <https://schema.org/> .` + crlf +
+		`@prefix ic-data: <http://ontology.tno.nl/interconnect/datapoint#> .` + crlf +
+		`@prefix time: <http://www.w3.org/2006/time#> .` + crlf +
 		`@prefix owl: <http://www.w3.org/2002/07/owl#> .` + crlf +
-		`@prefix org: <https://schema.org/> .` + crlf +
 		`@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .` + crlf +
 		`@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .` + crlf +
-		`@prefix saref: <` + SarefEtsiOrg + `core/> .` + crlf +
-		// include all referenced extensions here without a version number:
-		`@prefix s4ehaw: <` + SarefEtsiOrg + `saref4ehaw/> .` + crlf +
-		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
-		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
-		`@prefix ssn: <http://www.w3.org/ns/ssn/> .` + crlf +
-		`@prefix time: <http://www.w3.org/2006/time#> .` + crlf +
 		`@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .` + crlf +
 		`@prefix dcterms: <http://purl.org/dc/terms/> .` + crlf +
 		`@prefix dctype: <http://purl.org/dc/dcmitype/> .` + crlf +
+		// include all referenced extensions here without a version number:
+		`@prefix saref: <` + SarefEtsiOrg + `core/> .` + crlf +
+		//`@prefix s4ehaw: <` + SarefEtsiOrg + `saref4ehaw/> .` + crlf +
+		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
+		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
 		`<` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> rdf:type owl:Ontology ;` + crlf +
 		`    owl:versionInfo "v3.1.1" ;` + crlf +
 		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
@@ -1076,7 +1166,22 @@ func getBaselineOntology(identifier, title, description string) string {
 		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
 		crlf + crlf +
 		// extension class declarations for domains, ranges, rdfs:isDefinedBy
-		`###  ` + SarefEtsiOrg + `core/Time` + crlf +
+		`###  http://www.w3.org/2006/time#TemporalEntity` + crlf +
+		`time:TemporalEntity rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  http://www.w3.org/2006/time#Instant` + crlf +
+		`time:Instant rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  http://ontology.tno.nl/interconnect/datapoint#Usage` + crlf +
+		`ic-data:Usage rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  http://ontology.tno.nl/interconnect/datapoint#DataPoint` + crlf +
+		`ic-data:DataPoint rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  http://ontology.tno.nl/interconnect/datapoint#TimeSeries` + crlf +
+		`ic-data:TimeSeries rdf:type owl:Class .` + crlf +
+		crlf +
+		`###  ` + SarefEtsiOrg + `core/Time` + crlf + // or InterConnect Time???
 		`saref:Time rdf:type owl:Class .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + `core/Measurement` + crlf +
@@ -1084,12 +1189,6 @@ func getBaselineOntology(identifier, title, description string) string {
 		crlf +
 		`###  ` + SarefEtsiOrg + `core/UnitOfMeasure` + crlf +
 		`saref:UnitOfMeasure rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4ehaw/MeasurementFunction` + crlf +
-		`s4ehaw:MeasurementFunction rdf:type owl:Class .` + crlf +
-		crlf +
-		`###  ` + SarefEtsiOrg + `saref4ehaw/Data` + crlf +
-		`s4ehaw:Data rdf:type owl:Class .` + crlf +
 		crlf +
 		`###  ` + SarefEtsiOrg + `saref4envi/FrequencyUnit` + crlf +
 		`s4envi:FrequencyUnit rdf:type owl:Class .` + crlf +
@@ -1140,16 +1239,16 @@ func getBaselineOntology(identifier, title, description string) string {
 		` rdfs:label "is comparable to "@en .` + crlf +
 		crlf +
 		// non-core ObjectProperty extension references:
-		`###  ` + SarefEtsiOrg + `saref4ehaw/hasTimeSeriesMeasurement` + crlf + // s4ehaw:
+		/*`###  ` + SarefEtsiOrg + `saref4ehaw/hasTimeSeriesMeasurement` + crlf + // s4ehaw:
 		`s4ehaw:hasTimeSeriesMeasurement rdf:type owl:ObjectProperty ;` + crlf +
-		` rdfs:domain s4ehaw:Data ;` + crlf +
+		` rdfs:domain ic-data:DataPoint ;` + crlf +
 		` rdfs:range s4ehaw:TimeseriesMeasurement ;` + crlf +
 		` rdfs:comment "Data has time series measurements, a sequence taken at successive equally spaced points in time."@en ;` + crlf +
 		` rdfs:label "has time series measurement"@en .` + crlf +
-		crlf +
+		crlf +*/
 		// new common DatatypeProperties
-		`###  ` + SarefEtsiOrg + SarefExtension + `isRaw` + crlf +
-		`` + s4data + `isRaw rdf:type owl:DatatypeProperty ;` + crlf +
+		`###  ` + SarefEtsiOrg + SarefExtension + `isOriginal` + crlf +
+		`` + s4data + `isOriginal rdf:type owl:DatatypeProperty ;` + crlf +
 		` rdfs:range xsd:boolean ;` + crlf +
 		` rdfs:comment "The time series has (not) been cleaned or curated."@en ;` + crlf +
 		` rdfs:label "is raw data set"@en .` + crlf +
@@ -1260,14 +1359,16 @@ func getExternalReferences() string {
 	return `saref:Measurement a owl:Class .` + crlf +
 		`saref:Time a owl:Class .` + crlf +
 		`saref:UnitOfMeasure a owl:Class .` + crlf +
+		`ic-data:DataPoint a owl:Class .` + crlf +
+		`ic-data:TimeSeries a owl:Class .` + crlf +
 		`s4envi:FrequencyUnit a owl:Class .` + crlf +
 		`s4envi:FrequencyMeasurement a owl:Class .` + crlf +
-		`s4ehaw:MeasurementFunction a owl:Class .` + crlf +
-		`s4ehaw:Data a owl:Class .` + crlf +
+		//`s4ehaw:MeasurementFunction a owl:Class .` + crlf +
+		//`s4ehaw:Data a owl:Class .` + crlf +
+		//`s4ehaw:hasTimeSeriesMeasurement a owl:ObjectProperty .` + crlf // this is the only external ObjectProperty
 		`s4envi:FrequencyUnit a owl:Class .` + crlf +
 		`s4envi:FrequencyMeasurement a owl:Class .` + crlf +
-		`s4auto:Confidence a owl:Class .` + crlf +
-		`s4ehaw:hasTimeSeriesMeasurement a owl:ObjectProperty .` + crlf // this is the only external ObjectProperty
+		`s4auto:Confidence a owl:Class .` + crlf
 }
 
 // Expects nginx server running at http://localhost:80/datasets
@@ -1546,6 +1647,7 @@ var NamespaceMap = map[string]string{
 	"foaf":       "http://xmlns.com/foaf/0.1/",
 	"geo":        "http://www.opengis.net/ont/geosparql#",
 	"geosp":      "http://www.opengis.net/ont/geosparql#",
+	"ic-data":    "<http://ontology.tno.nl/interconnect/datapoint#",
 	"owl":        "http://www.w3.org/2002/07/owl#",
 	"prov":       "http://www.w3.org/ns/prov#",
 	"rdf":        "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
@@ -2603,7 +2705,6 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
 		if iot.Summary[ndx+1][0] == "interpolated" || len(iot.Summary[ndx+1][0]) < 2 {
 			iot.GroupName = iot.Summary[ndx+1][1]
-			fmt.Println(iot.GroupName) //<<<
 			ndx1 = ndx
 			break
 		}
