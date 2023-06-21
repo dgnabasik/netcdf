@@ -70,6 +70,8 @@ const ( // these do not include trailing >
 	crlf                   = "\n"
 	timeAlias              = "time1"
 	blockSize              = 163840 //=20*8192 	131072=16*8192
+	maxColumns             = 256
+	interpolated           = "interpolated"
 )
 
 var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
@@ -149,69 +151,81 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
+// for both IotDB & GraphDB.
+var databaseCommands = []string{"list"}
+
 // Separate struct if we want slice of these in container class.
 // Keep these field names different from container structs to avoid confusion.
 type IoTDbAccess struct {
-	session       client.Session
-	Sql           string   `json:"sql"`
-	ActiveSession bool     `json:"activesession"`
-	QueryResults  []string `json:"queryresults"`
+	session            client.Session
+	Sql                string   `json:"sql"`
+	ActiveSession      bool     `json:"activesession"`
+	TimeseriesCommands []string `json:"timeseriescommands"` // given as command-line parameters
+	QueryResults       []string `json:"queryresults"`
+}
+
+func (iotAccess *IoTDbAccess) GetTimeseriesCommands(programArgs []string) {
+	iotAccess.TimeseriesCommands = make([]string, 0)
+	for ndx := range programArgs {
+		cmd, index := find(databaseCommands, strings.ToLower(programArgs[ndx]))
+		if index >= 0 {
+			iotAccess.TimeseriesCommands = append(iotAccess.TimeseriesCommands, strings.ToLower(cmd))
+		}
+	}
 }
 
 // Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-// root.etsidata.**;  =>  all timeseries
-func (iotAccess *IoTDbAccess) GetTimeseriesList(groupName, datasetName string) []IotdbTimeseriesProfile {
+func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName string) []IotdbTimeseriesProfile {
 	var timeout int64 = 1000
 	const blockSize = 11
-	timeseriesList := make([]IotdbTimeseriesProfile, 0)
+	timeseriesList := make([]IotdbTimeseriesProfile, 0) // want multiples of this number
 	timeseriesItem := IotdbTimeseriesProfile{}
-	iotAccess.Sql = EtsidataRoot + ".**;"
-	if len(groupName)+len(datasetName) != 0 {
-		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + groupName + "." + datasetName + ".*;"
-	}
-	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
-	if err == nil {
-		lines := printDataSet(sessionDataSet)
-		for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
-			if ndx > (blockSize - 1) {
-				index := ndx % blockSize
-				line := strings.TrimSpace(str)
-				switch index {
-				case 0:
-					timeseriesItem = IotdbTimeseriesProfile{}
-					timeseriesItem.Timeseries = line
-				case 1:
-					timeseriesItem.Alias = line
-				case 2:
-					timeseriesItem.Database = line
-				case 3:
-					timeseriesItem.DataType = line
-				case 4:
-					timeseriesItem.Encoding = line
-				case 5:
-					timeseriesItem.Compression = line
-				case 6:
-					timeseriesItem.Tags = line
-				case 7:
-					timeseriesItem.Attributes = line
-				case 8:
-					timeseriesItem.Deadband = line
-				case 9:
-					timeseriesItem.DeadbandParameters = line
-				case 10:
-					timeseriesList = append(timeseriesList, timeseriesItem)
+	for groupIndex := 0; groupIndex < len(groupNames); groupIndex++ {
+		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
+		sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
+		if err == nil {
+			lines := printDataSet(sessionDataSet)
+			for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
+				if ndx > (blockSize - 1) {
+					index := ndx % blockSize
+					line := strings.TrimSpace(str)
+					switch index {
+					case 0:
+						timeseriesItem = IotdbTimeseriesProfile{}
+						timeseriesItem.Timeseries = line
+					case 1:
+						timeseriesItem.Alias = line
+					case 2:
+						timeseriesItem.Database = line
+					case 3:
+						timeseriesItem.DataType = line
+					case 4:
+						timeseriesItem.Encoding = line
+					case 5:
+						timeseriesItem.Compression = line
+					case 6:
+						timeseriesItem.Tags = line
+					case 7:
+						timeseriesItem.Attributes = line
+					case 8:
+						timeseriesItem.Deadband = line
+					case 9:
+						timeseriesItem.DeadbandParameters = line
+					case 10:
+						timeseriesList = append(timeseriesList, timeseriesItem)
+					}
 				}
 			}
+			sessionDataSet.Close()
+		} else {
+			checkErr("iotAccess.GetTimeseriesList("+datasetName+")", err)
 		}
-		sessionDataSet.Close()
-	} else {
-		checkErr("iotAccess.GetTimeseriesList("+datasetName+")", err)
-	}
+	} // for groupIndex
 
 	// format/assign iotAccess.QueryResults
-	const cwidth0 = 48
-	const cwidth1 = 8
+	const cwidth0 = 100
+	const cwidth1 = 10
 	const sep = "|"
 	iotAccess.QueryResults = make([]string, 0) // skip Alias,Database,Tags|Attributes|Deadband|DeadbandParameters
 	iotAccess.QueryResults = append(iotAccess.QueryResults, "                                     Timeseries |DataType|Encoding|Compress|")
@@ -337,9 +351,9 @@ func WriteStringToFile(filePath, str string) error {
 func GetTimeseriesCommands(programArgs []string) []string {
 	timeseriesCommands := make([]string, 0)
 	for ndx := range programArgs {
-		_, index := find(timeSeriesCommands, strings.ToLower(programArgs[ndx]))
+		cmd, index := find(timeSeriesCommands, strings.ToLower(programArgs[ndx]))
 		if index >= 0 {
-			timeseriesCommands = append(timeseriesCommands, strings.ToLower(programArgs[ndx]))
+			timeseriesCommands = append(timeseriesCommands, strings.ToLower(cmd))
 		}
 	}
 	return timeseriesCommands
@@ -399,11 +413,10 @@ type NetCDF struct {
 	HouseIndices     []string                        `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
 	LongtimeIndices  []string                        `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
 	// these are not in the source file.
-	TimeseriesCommands []string   `json:"timeseriescommands"` // command-line parameters
-	DataFilePath       string     `json:"datafilepath"`
-	DatasetName        string     `json:"datasetname"`
-	Summary            [][]string `json:"summary"` // from summary file
-	Dataset            [][]string `json:"dataset"` // actual data
+	DataFilePath string     `json:"datafilepath"`
+	DatasetName  string     `json:"datasetname"`
+	Summary      [][]string `json:"summary"` // from summary file
+	Dataset      [][]string `json:"dataset"` // actual data
 }
 
 func (cdf NetCDF) ToString(outputVariables bool) string {
@@ -692,18 +705,13 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	}
 	ndx1 := 0
 	dimMap := cdf.getDimensionMap()
-	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
-		if cdf.Summary[ndx+1][0] == "interpolated" || len(cdf.Summary[ndx+1][0]) < 2 {
-			cdf.GroupName = cdf.Summary[ndx+1][1]
-			ndx1 = ndx
-			break
-		}
+	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
 		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // NOTE!! does not include cdf.Summary[ndx+1][0] == "time" ||
-		ignore := cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0"
+		ignore := cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0"
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == "interpolated"
+		theEnd := cdf.Summary[ndx+1][0] == interpolated || len(cdf.Summary[ndx+1][0]) < 2
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  dataColumnName,
@@ -722,6 +730,8 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 				Calendar:        "",
 			}
 			cdf.Measurements[dataColumnName] = &mv // add to map using original name
+		} else {
+			break
 		}
 	}
 	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
@@ -924,10 +934,13 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 
 		case "query":
-			iotdbTimeseriesList := cdf.GetTimeseriesList(cdf.GroupName, cdf.DatasetName)
-			outputPath := GetOutputPath(cdf.DataFilePath, ".sql")
+			deviceIdList := make([]string, len(cdf.HouseIndices))
+			for ndx := 0; ndx < len(cdf.HouseIndices); ndx++ {
+				deviceIdList[ndx] = cdf.HouseIndices[ndx] + "."
+			}
+			iotdbTimeseriesList := cdf.GetTimeseriesList(deviceIdList, cdf.DatasetName+".")
 			itp := IotdbTimeseriesProfile{}
-			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) // 1 was cdf.QueryResults
+			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), cdf.DataFilePath+"/"+cdf.DatasetName+".sql", false)
 			checkErr("WriteTextLines(query)", err)
 
 		case "example": // serialize saref class file:
@@ -1533,7 +1546,7 @@ func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, er
 	//fmt.Println(xcdf.ToString(true)) // true => output variables
 
 	// move UploadFile() statements.
-	err = xcdf.ReadCsvFile(GetSummaryFilename(xcdf.DataFilePath), false) // isDataset: no, is summary
+	err = xcdf.ReadCsvFile(GetSummaryFilename(programArgs[1]), false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	//err = UploadFile(DataSetPrefix+outputCsvFile, summaryLines)
 	//checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
@@ -1568,6 +1581,35 @@ func LoadHd5SensorDataIntoDatabase(programArgs []string) {
 	// <<<
 }
 
+func ProcessTimeSeriesDatabase(programArgs []string) error {
+	createSession := CreateIotSession(programArgs)
+	iotdb := IoTDbAccess{ActiveSession: createSession, session: client.NewSession(clientConfig)}
+	if err := iotdb.session.Open(false, 0); err != nil {
+		checkErr("ProcessTimeseriesDatabase: ", err)
+	}
+	defer iotdb.session.Close()
+
+	fmt.Println("Processing time series database commands ...")
+	iotdb.GetTimeseriesCommands(programArgs)
+	for _, command := range iotdb.TimeseriesCommands {
+		switch command {
+		case "list": // all timeseries
+			iotdbTimeseriesList := iotdb.GetTimeseriesList([]string{""}, "*")
+			itp := IotdbTimeseriesProfile{}
+			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), "./iotdb.timeseries.list", false)
+			checkErr("WriteTextLines(query)", err)
+
+		}
+		fmt.Println("Database <" + command + "> completed.")
+	} // for
+
+	return nil
+}
+
+func ProcessGraphDatabase(programArgs []string) {
+	// <<<
+}
+
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
 func main() {
 	//fmt.Println(ShowLastExternalBackup())
@@ -1583,6 +1625,10 @@ func main() {
 		LoadNcSensorDataIntoDatabase(os.Args)
 	case ".hd5":
 		LoadHd5SensorDataIntoDatabase(os.Args)
+	case ".iotdb":
+		ProcessTimeSeriesDatabase(os.Args)
+	case ".graphdb":
+		ProcessGraphDatabase(os.Args)
 	default:
 		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any time series command: {drop create delete insert example}.")
 		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
@@ -2617,6 +2663,7 @@ func configureIotdbAccess() *client.Config {
 	return config
 }
 
+// Assigns clientConfig.
 func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 	fmt.Println("Initializing IoTDB client...")
 	clientConfig = configureIotdbAccess()
@@ -2634,15 +2681,14 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 type IoTDbCsvDataFile struct {
 	IoTDbAccess
-	GroupName          string                     `json:"groupname"` // root.etsidata.GroupName
-	Description        string                     `json:"description"`
-	DataFilePath       string                     `json:"datafilepath"`
-	DataFileType       string                     `json:"datafiletype"`
-	DatasetName        string                     `json:"datasetname"`
-	Measurements       map[string]MeasurementItem `json:"measurements"`       //<<< make pointer! one less than the number of rows in summary file.
-	TimeseriesCommands []string                   `json:"timeseriescommands"` // command-line parameters
-	Summary            [][]string                 `json:"summary"`            // from summary file
-	Dataset            [][]string                 `json:"dataset"`            // actual data
+	GroupName    string                     `json:"groupname"` // root.etsidata.GroupName
+	Description  string                     `json:"description"`
+	DataFilePath string                     `json:"datafilepath"`
+	DataFileType string                     `json:"datafiletype"`
+	DatasetName  string                     `json:"datasetname"`
+	Measurements map[string]MeasurementItem `json:"measurements"` //<<< make pointer! one less than the number of rows in summary file.
+	Summary      [][]string                 `json:"summary"`      // from summary file
+	Dataset      [][]string                 `json:"dataset"`      // actual data
 }
 
 // expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
@@ -2740,8 +2786,9 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		}
 	}
 	ndx1 := 0
-	for ndx := 0; ndx < 256; ndx++ { // iterate over summary file rows.
-		if iot.Summary[ndx+1][0] == "interpolated" || len(iot.Summary[ndx+1][0]) < 2 {
+	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
+		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || len(iot.Summary[ndx+1][0]) < 2
+		if endOfMeasurements {
 			iot.GroupName = iot.Summary[ndx+1][1]
 			ndx1 = ndx
 			break
@@ -2751,7 +2798,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == "interpolated"
+		theEnd := dataColumnName == interpolated
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  aliasName, // the CSV field names are often unusable.
@@ -2966,7 +3013,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			fmt.Println()
 
 		case "query":
-			iotdbTimeseriesList := iot.GetTimeseriesList(iot.GroupName, iot.DatasetName)
+			iotdbTimeseriesList := iot.GetTimeseriesList([]string{iot.GroupName + "."}, iot.DatasetName+".")
 			outputPath := GetOutputPath(iot.DataFilePath, ".sql")
 			itp := IotdbTimeseriesProfile{}
 			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) // 1 was cdf.QueryResults
