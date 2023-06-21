@@ -55,12 +55,12 @@ import (
 
 const ( // these do not include trailing >
 	HomeDirectory          = "/home/david/" // davidgnabasik
+	EtsidataRoot           = "root.etsidata"
 	CurrentVersion         = "v1.0.1/"
 	SarefExtension         = "saref4data/"
 	s4data                 = "s4data:"
 	SarefEtsiOrg           = "https://saref.etsi.org/"
 	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
-	timeseriesDescription  = "/description.txt"
 	serializationExtension = ".ttl" //trig<<< Classic Turtle does not support named graphs. Must output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	jsonExtension          = ".json"
@@ -72,7 +72,7 @@ const ( // these do not include trailing >
 	blockSize              = 163840 //=20*8192 	131072=16*8192
 )
 
-var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
+var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
@@ -88,6 +88,46 @@ Exponential distribution: Model elapsed time between two events.
 Gamma distribution: Describes the time to wait for a fixed number of events.
 Weibull Distribution: Describes a waiting time for one event, if that event becomes more or less likely with time.
 */
+
+type TimeseriesMetadata struct { // <<<
+	Description string `json:"description"`
+}
+
+func (tsmd *TimeseriesMetadata) ReadJsonFile(filename string) (TimeseriesMetadata, error) {
+	funcName := "TimeseriesMetadata.ReadJsonFile"
+	file, err := os.Open(filename)
+	checkErr(funcName, err)
+	defer file.Close()
+
+	byteValue, err := io.ReadAll(file)
+	checkErr(funcName, err)
+
+	var data TimeseriesMetadata
+	err = json.Unmarshal(byteValue, &data)
+	checkErr(funcName, err)
+
+	return data, nil
+}
+
+func GetTimeseriesMetadata(filePath string) (TimeseriesMetadata, bool) {
+	found, _ := FileExists(filePath)
+	tsmd := TimeseriesMetadata{Description: "not defined"}
+	if !found {
+		return tsmd, false
+	}
+	tsmd, _ = tsmd.ReadJsonFile(filePath)
+	return tsmd, true
+}
+
+func GetMetadataFilename(dataFilePath string) string {
+	fileName := filepath.Base(dataFilePath)
+	return filepath.Dir(dataFilePath) + "/metadata_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + jsonExtension
+}
+
+func GetSummaryFilename(dataFilePath string) string {
+	fileName := filepath.Base(dataFilePath)
+	return filepath.Dir(dataFilePath) + "/summary_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + csvExtension
+}
 
 // Contains an entire month's worth of Entity data for every Variable where each row is indexed by {HouseIndex+LongtimeIndex}.
 type EntityCleanData struct {
@@ -118,14 +158,18 @@ type IoTDbAccess struct {
 	QueryResults  []string `json:"queryresults"`
 }
 
-// Assign iotAccess.QueryResults; return []TimeseriesProfile
+// Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-func (iotAccess *IoTDbAccess) GetTimeseriesList(groupName, datasetName string) []TimeseriesProfile {
+// root.etsidata.**;  =>  all timeseries
+func (iotAccess *IoTDbAccess) GetTimeseriesList(groupName, datasetName string) []IotdbTimeseriesProfile {
 	var timeout int64 = 1000
 	const blockSize = 11
-	timeseriesList := make([]TimeseriesProfile, 0)
-	timeseriesItem := TimeseriesProfile{}
-	iotAccess.Sql = "show timeseries " + IotDatasetPrefix(groupName, datasetName) + ".*;"
+	timeseriesList := make([]IotdbTimeseriesProfile, 0)
+	timeseriesItem := IotdbTimeseriesProfile{}
+	iotAccess.Sql = EtsidataRoot + ".**;"
+	if len(groupName)+len(datasetName) != 0 {
+		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + groupName + "." + datasetName + ".*;"
+	}
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 	if err == nil {
 		lines := printDataSet(sessionDataSet)
@@ -135,7 +179,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(groupName, datasetName string) [
 				line := strings.TrimSpace(str)
 				switch index {
 				case 0:
-					timeseriesItem = TimeseriesProfile{}
+					timeseriesItem = IotdbTimeseriesProfile{}
 					timeseriesItem.Timeseries = line
 				case 1:
 					timeseriesItem.Alias = line
@@ -184,17 +228,26 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(groupName, datasetName string) [
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-type TimeseriesProfile struct {
-	Timeseries         string
-	Alias              string
-	Database           string
-	DataType           string
-	Encoding           string
-	Compression        string
-	Tags               string
-	Attributes         string
-	Deadband           string
-	DeadbandParameters string
+type IotdbTimeseriesProfile struct {
+	Timeseries         string `json:"timeseries"`
+	Alias              string `json:"alias"`
+	Database           string `json:"database"`
+	DataType           string `json:"datatype"`
+	Encoding           string `json:"encoding"`
+	Compression        string `json:"compression"`
+	Tags               string `json:"tags"`
+	Attributes         string `json:"attributes"`
+	Deadband           string `json:"deadband"`
+	DeadbandParameters string `json:"deadbandparameters"`
+}
+
+// Returns [groupName.deviceName.measurementName]
+func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfile) []string {
+	output := make([]string, len(list))
+	for ndx := range list {
+		output[ndx] = strings.Replace(list[ndx].Timeseries, EtsidataRoot+".", "", 1)
+	}
+	return output
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -294,7 +347,7 @@ func GetTimeseriesCommands(programArgs []string) []string {
 
 // Format: root.etsidata.<group>.<device>	The Ecobee {id} value acts as a device.  Specific Measurement names are appended to this prefix.
 func IotDatasetPrefix(group, device string) string {
-	return "root.etsidata." + group + "." + device
+	return EtsidataRoot + group + "." + device
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -348,7 +401,6 @@ type NetCDF struct {
 	// these are not in the source file.
 	TimeseriesCommands []string   `json:"timeseriescommands"` // command-line parameters
 	DataFilePath       string     `json:"datafilepath"`
-	SummaryFilePath    string     `json:"summaryfilepath"`
 	DatasetName        string     `json:"datasetname"`
 	Summary            [][]string `json:"summary"` // from summary file
 	Dataset            [][]string `json:"dataset"` // actual data
@@ -505,7 +557,7 @@ func (cdf NetCDF) GetMeasurementVariableFromName(name string) (MeasurementVariab
 	return MeasurementVariable{}, false
 }
 
-// Return all column values except header row. Return false if wrong column name. Fill in default values.
+// Return all column values except header row. Return false if column name not found. Fill in default values.
 func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	_, columnIndex := find(summaryColumnNames, columnName)
 	if columnIndex < 0 {
@@ -513,10 +565,10 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	}
 	stats := make([]string, len(cdf.Measurements))
 	for ndx := 0; ndx < len(cdf.Measurements)-1; ndx++ {
-		dataColumnName, _ := StandardName(cdf.Summary[ndx+1][0])
-		item, _ := cdf.GetMeasurementVariableFromName(dataColumnName) // MeasurementVariable
+		_, aliasName := StandardName(cdf.Summary[ndx+1][0])
+		item, _ := cdf.GetMeasurementVariableFromName(aliasName) // MeasurementVariable
 		stats[ndx] = strings.TrimSpace(cdf.Summary[ndx+1][columnIndex])
-		if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") {
+		if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") || strings.HasPrefix(strings.ToLower(item.MeasurementType), "long") {
 			index := strings.Index(stats[ndx], ".")
 			if index >= 0 {
 				stats[ndx] = stats[ndx][0:index]
@@ -530,13 +582,15 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 }
 
 // Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
-func (cdf NetCDF) Format_Ontology() []string {
+// Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
+// <<< Specify output={no data, summary, all data}
+func (cdf NetCDF) Format_Ontology(dataOutputChoice int) []string {
 	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0
 	for _, v := range cdf.Measurements {
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)] + crlf
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementAlias + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)] + crlf
 		if ndx < len(cdf.Measurements) {
 			str += `] ,`
 		} else {
@@ -563,7 +617,7 @@ func (cdf NetCDF) Format_Ontology() []string {
 	output = append(output, `ex:StopTimeseries`+uniqueID)
 	output = append(output, `rdf:type `+s4data+`StopTimeseries ;`)
 	output = append(output, `rdf:label "StopTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `### internel references`+crlf)
+	output = append(output, `### internal references`+crlf)
 
 	values, ok := cdf.GetSummaryStatValues("mean")
 	output = append(output, `<`+DataSetPrefix+cdf.Identifier+uniqueID+`> rdf:type owl:NamedIndividual , `)
@@ -573,11 +627,18 @@ func (cdf NetCDF) Format_Ontology() []string {
 		for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
 			for _, v := range cdf.Measurements { //
 				if v.ColumnOrder == ndx && !v.Ignore {
-					str := s4data + v.MeasurementName + ` "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)]
+					xsd := xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)]
+					if len(xsd) < 1 {
+						fmt.Println("  invalid type: " + v.MeasurementItem.MeasurementType)
+					}
+					if xsd == "decimal" && strings.Contains(strings.ToLower(values[ndx]), "e") { // remove Exponent
+						values[ndx] = fmt.Sprintf("%.14f", formatFloat(values[ndx]))
+					}
+					str := s4data + v.MeasurementAlias + ` "` + values[ndx] + `"^^xsd:` + xsd
 					if v.ColumnOrder < len(cdf.Measurements)-1 {
 						str += ` ;`
-					} else {
-						str += ` .`
+					} else { // DatasetName
+						str = s4data + v.MeasurementAlias + ` "` + cdf.DatasetName + `"^^xsd:` + xsd + ` .`
 					}
 					output = append(output, str)
 					break
@@ -863,13 +924,14 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 
 		case "query":
-			cdf.GetTimeseriesList(cdf.GroupName, cdf.DatasetName)
+			iotdbTimeseriesList := cdf.GetTimeseriesList(cdf.GroupName, cdf.DatasetName)
 			outputPath := GetOutputPath(cdf.DataFilePath, ".sql")
-			err := WriteTextLines(cdf.QueryResults, outputPath, false)
+			itp := IotdbTimeseriesProfile{}
+			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) // 1 was cdf.QueryResults
 			checkErr("WriteTextLines(query)", err)
 
 		case "example": // serialize saref class file:
-			ttlLines := cdf.Format_Ontology()
+			ttlLines := cdf.Format_Ontology(1)
 			outputPath := GetOutputPath(cdf.DataFilePath, serializationExtension)
 			err := WriteTextLines(ttlLines, outputPath, false)
 			checkErr("WriteTextLines(example)", err)
@@ -882,15 +944,13 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 }
 
 // Return NetCDF struct by parsing Jan_clean.var file that is output from /usr/bin/ncdump -c Jan_clean.nc. Var files are specific to *.nc datasets.
-func ParseVariableFile(varFile, filetype, dataSetIdentifier string, description, programArgs []string, isActive bool) (NetCDF, error) {
+func ParseVariableFile(varFile, filetype, dataSetIdentifier, description string, programArgs []string, isActive bool) (NetCDF, error) {
 	lines, err := ReadTextLines(varFile, false)
 	checkErr("Could not access "+varFile, err)
 	datasetPathName := filepath.Dir(programArgs[1]) // does not include trailing slash
 	ioTDbAccess := IoTDbAccess{ActiveSession: isActive}
-	xcdf := NetCDF{IoTDbAccess: ioTDbAccess, Description: strings.Join(description, " "), DataFilePath: datasetPathName, DatasetName: dataSetIdentifier, NetcdfType: filetype}
+	xcdf := NetCDF{IoTDbAccess: ioTDbAccess, Description: description, DataFilePath: datasetPathName, DatasetName: dataSetIdentifier, NetcdfType: filetype}
 	xcdf.TimeseriesCommands = GetTimeseriesCommands(programArgs)
-	xcdf.SummaryFilePath = datasetPathName + "/" + summaryPrefix + filepath.Base(varFile) + csvExtension
-	xcdf.SummaryFilePath = strings.Replace(xcdf.SummaryFilePath, varExtension, "", 1)
 	lineIndex := 0
 	tokens := strings.Split(lines[lineIndex], " ")
 	xcdf.Identifier = tokens[1] // override
@@ -1378,23 +1438,6 @@ func UploadFile(destinationUrl string, lines []string) error {
 	return nil
 }
 
-// Not used.
-func readJsonFileInto_NetCDF(filename string) (NetCDF, error) {
-	funcName := "readJsonFileInto_NetCDF"
-	file, err := os.Open(filename)
-	checkErr(funcName, err)
-	defer file.Close()
-
-	byteValue, err := io.ReadAll(file)
-	checkErr(funcName, err)
-
-	var data NetCDF
-	err = json.Unmarshal(byteValue, &data)
-	checkErr(funcName, err)
-
-	return data, nil
-}
-
 func prettifyString(str string) string {
 	s := strings.TrimSpace(strings.ReplaceAll(str, "\"", ""))
 	if strings.HasSuffix(s, ";") {
@@ -1480,26 +1523,24 @@ func isAccessibleSensorDataFile(dataFilePath string) error {
 }
 
 func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, error) {
-	datasetPathName := programArgs[1]                // *.nc file
-	fileType := programArgs[2]                       // subtype of *.nc file.
-	outputPath := GetOutputPath(datasetPathName, "") // path has no extension
-	datasetName := path.Base(outputPath)             // Jan_clean
-	description, _ := ReadTextLines(filepath.Dir(datasetPathName)+timeseriesDescription, false)
-	isAccessibleSensorDataFile(datasetPathName)
-
-	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, description, programArgs, isActive)
+	fileType := programArgs[2]                                                // subtype of *.nc file.
+	outputPath := GetOutputPath(programArgs[1], "")                           // path has no extension
+	datasetName := path.Base(outputPath)                                      // Jan_clean
+	metadata, _ := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1])) // found
+	isAccessibleSensorDataFile(programArgs[1])
+	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, metadata.Description, programArgs, isActive)
 	checkErr("ParseVariableFile", err)
 	//fmt.Println(xcdf.ToString(true)) // true => output variables
 
 	// move UploadFile() statements.
-	err = xcdf.ReadCsvFile(xcdf.SummaryFilePath, false) // isDataset: no, is summary
+	err = xcdf.ReadCsvFile(GetSummaryFilename(xcdf.DataFilePath), false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	//err = UploadFile(DataSetPrefix+outputCsvFile, summaryLines)
 	//checkErr("UploadFile: "+DataSetPrefix+datasetName+serializationExtension, err)
 
 	xcdf.XsvSummaryTypeMap()
 
-	ontology := xcdf.Format_Ontology()
+	ontology := xcdf.Format_Ontology(1)
 	err = WriteTextLines(ontology, outputPath+serializationExtension, false)
 	checkErr("WriteTextLines("+serializationExtension+")", err)
 	err = UploadFile(DataSetPrefix+datasetName+serializationExtension, ontology)
@@ -1545,7 +1586,7 @@ func main() {
 	default:
 		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any time series command: {drop create delete insert example}.")
 		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
-		fmt.Println("including a description.txt file. All static time series data sits in the {root.etsidata.} database.")
+		fmt.Println("including a description.txt file. All static time series data sits in the {" + EtsidataRoot + "} database.")
 		fmt.Println("Required *.nc parameters: 1) path to single *.nc & *.var files, and 2) CDF file type {HDF5, netCDF-4, classic}.")
 		fmt.Println("  Optionally specify the unique dataset identifier; e.g. Entity_clean_5min")
 		os.Exit(0)
@@ -1667,10 +1708,10 @@ var NamespaceMap = map[string]string{
 }
 
 type GraphDbProgramParameters struct {
-	TtlFileDirectory     string  `json:"ttlFileDirectory"`
-	SimilarityCutoff     float64 `json:"similarityCutoff"`
-	DefaultDbInstanceUrl string  `json:"defaultDbInstanceUrl"`
-	DefaultUserMode      string  `json:"defaultUserMode"`
+	TtlFileDirectory     string  `json:"ttlfiledirectory"`
+	SimilarityCutoff     float64 `json:"similaritycutoff"`
+	DefaultDbInstanceUrl string  `json:"defaultdbinstanceUrl"`
+	DefaultUserMode      string  `json:"defaultusermode"`
 }
 
 func (progParams GraphDbProgramParameters) DisplayProgramStats(stats []string) {
@@ -1686,6 +1727,7 @@ func (progParams GraphDbProgramParameters) DisplayProgramStats(stats []string) {
 
 const (
 	ttlFileDirectory     = HomeDirectory + "Documents/ontologies.ttl/"
+	graphdbPgmParams     = HomeDirectory + "Documents/digital-twins/netcdf/graphdb/graphdb.json"
 	defaultUserMode      = "auto"
 	similarityCutoff     = 0.92
 	defaultDbInstanceUrl = "http://localhost:7200/repositories/merged" // nmap -p 7200 localhost
@@ -1693,7 +1735,7 @@ const (
 
 var graphDBparameters GraphDbProgramParameters
 
-func assignProgramParametersDefaults(err error) {
+func assignGraphdbProgramParametersDefaults(err error) {
 	fmt.Println(err)
 	fmt.Println("Unable to read configuration file ./graphdb.json ... using defaults.")
 	graphDBparameters = GraphDbProgramParameters{
@@ -1707,21 +1749,21 @@ func assignProgramParametersDefaults(err error) {
 
 // Return default GraphDbProgramParameters values if file not found. Expects graphdb package folder is directly beneath main go file.
 // Do not use global init() because you can't control when it is run -- could be before or after main().
-func assignProgramParameters() {
-	file, err := os.ReadFile(HomeDirectory + "Documents/digital-twins/netcdf/graphdb/graphdb.json")
+func assignGraphdbProgramParameters() {
+	file, err := os.ReadFile(graphdbPgmParams)
 	if err != nil {
-		assignProgramParametersDefaults(err)
+		assignGraphdbProgramParametersDefaults(err)
 		return
 	}
 	err = json.Unmarshal([]byte(file), &graphDBparameters)
 	if err != nil {
-		assignProgramParametersDefaults(err)
+		assignGraphdbProgramParametersDefaults(err)
 	}
 }
 
 // is GraphDB available? (does not test for merged repository)
 func Init_GraphDB() (string, bool) {
-	assignProgramParameters()
+	assignGraphdbProgramParameters()
 	tokens := strings.Split(graphDBparameters.DefaultDbInstanceUrl, ":")
 	host := strings.ReplaceAll(tokens[1], "/", "") // "localhost"
 	tokens = strings.Split(tokens[2], "/")
@@ -1903,7 +1945,7 @@ func removeDuplicateStr(strSlice []string) []string {
 
 // This struct is returned from GetClosestSarefEntity().
 type EntityVariableAlias struct {
-	EntityName     string             `json:"Entityname"`
+	EntityName     string             `json:"entityname"`
 	NameTokens     []string           `json:"nametokens"`
 	SarefEntityIRI map[string]float64 `json:"sarefentityiri"`
 }
@@ -2272,9 +2314,8 @@ func ChooseEntitiesToChange(similarEnities []Similarity) []Similarity {
 // /////////////////////////////////////////////////////////////////////////////////////////
 // ISO 8601 format: use package iso8601 since The built-in RFC3333 time layout in Go is too restrictive to support any ISO8601 date-time.
 const (
-	summaryPrefix  = "summary_"
-	OutputLocation = SarefEtsiOrg + "datasets/examples/" //<<< wrong
-	TimeFormat     = "2006-01-02T15:04:05Z"              // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
+	OutputLocation = SarefEtsiOrg + "saref4data/v1.0.1/datasets/"
+	TimeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
 	TimeFormat1    = "2006-01-02 15:04:05"
 	TimeFormatNano = "2006-01-02T15:04:05.000Z07:00" // this is the preferred milliseconds version.
 	LastColumnName = "DatasetName"
@@ -2471,8 +2512,7 @@ func formatDataItem(s, dataType string) string {
 // Does not handle 2 aliases being the same. Return MeasurementName, MeasurementAlias.
 // Some variable names must be aliased in SQL statements: {time, timestamp}
 func StandardName(oldName string) (string, string) {
-	//newName := strings.TrimSpace(cases.Title(language.Und, cases.NoLower).String(oldName)) // uppercase first letter
-	newName := strings.TrimSpace(oldName)
+	newName := strings.TrimSpace(strings.Title(strings.TrimSpace(oldName))) // uppercase first letter of each word
 	replacer := strings.NewReplacer("~", "", "!", "", "@", "", "#", "", "$", "", "%", "", "^", "", "&", "", "*", "", "/", "", "?", "", ".", "", ",", "", ":", "", ";", "", "|", "", "\\", "", "=", "", "+", "", ")", "", "}", "", "]", "", "(", "_", "{", "_", "[", "_")
 	alias := strings.ReplaceAll(newName, " ", "")
 	alias = replacer.Replace(alias)
@@ -2598,7 +2638,6 @@ type IoTDbCsvDataFile struct {
 	Description        string                     `json:"description"`
 	DataFilePath       string                     `json:"datafilepath"`
 	DataFileType       string                     `json:"datafiletype"`
-	SummaryFilePath    string                     `json:"summaryfilepath"`
 	DatasetName        string                     `json:"datasetname"`
 	Measurements       map[string]MeasurementItem `json:"measurements"`       //<<< make pointer! one less than the number of rows in summary file.
 	TimeseriesCommands []string                   `json:"timeseriescommands"` // command-line parameters
@@ -2608,16 +2647,15 @@ type IoTDbCsvDataFile struct {
 
 // expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
 func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvDataFile, error) {
-	datasetPathName := filepath.Dir(programArgs[1]) // does not include trailing slash
-	datasetName := filepath.Base(programArgs[1])    // includes extension
+	//datasetPathName := filepath.Dir(programArgs[1]) // does not include trailing slash
+	datasetName := filepath.Base(programArgs[1]) // includes extension
 	datasetName = strings.Replace(datasetName, csvExtension, "", 1)
-	description, _ := ReadTextLines(datasetPathName+timeseriesDescription, false)
+	metadata, _ := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1])) // found
 	isAccessibleSensorDataFile(programArgs[1])
 	ioTDbAccess := IoTDbAccess{ActiveSession: isActive}
-	iotdbDataFile := IoTDbCsvDataFile{IoTDbAccess: ioTDbAccess, Description: strings.Join(description, " "), DataFilePath: programArgs[1], DatasetName: datasetName}
+	iotdbDataFile := IoTDbCsvDataFile{IoTDbAccess: ioTDbAccess, Description: metadata.Description, DataFilePath: programArgs[1], DatasetName: datasetName}
 	iotdbDataFile.TimeseriesCommands = GetTimeseriesCommands(programArgs)
-	iotdbDataFile.SummaryFilePath = datasetPathName + "/" + summaryPrefix + filepath.Base(programArgs[1])
-	err := iotdbDataFile.ReadCsvFile(iotdbDataFile.SummaryFilePath, false) // isDataset: no, is summary
+	err := iotdbDataFile.ReadCsvFile(GetSummaryFilename(iotdbDataFile.DataFilePath), false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	iotdbDataFile.XsvSummaryTypeMap()
 	//fmt.Println(iotdbDataFile.OutputDescription(true))
@@ -2664,7 +2702,7 @@ func (iot *IoTDbCsvDataFile) GetMeasurementItemFromName(name string) (Measuremen
 	return item, false
 }
 
-// Return all column values except header row. Return false if wrong column name. Fill in default values.
+// Return all column values except header row. Return false if column name not found. Fill in default values.
 func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, bool) {
 	_, columnIndex := find(summaryColumnNames, columnName)
 	if columnIndex < 0 {
@@ -2672,10 +2710,10 @@ func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, 
 	}
 	stats := make([]string, len(iot.Measurements))
 	for ndx := 0; ndx < len(iot.Measurements); ndx++ {
-		dataColumnName, _ := StandardName(iot.Summary[ndx+1][0]) // aliasName
-		item, _ := iot.GetMeasurementItemFromName(dataColumnName)
+		_, aliasName := StandardName(iot.Summary[ndx+1][0])
+		item, _ := iot.GetMeasurementItemFromName(aliasName)
 		stats[ndx] = strings.TrimSpace(iot.Summary[ndx+1][columnIndex])
-		if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") {
+		if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") || strings.HasPrefix(strings.ToLower(item.MeasurementType), "long") {
 			index := strings.Index(stats[ndx], ".")
 			if index >= 0 {
 				stats[ndx] = stats[ndx][0:index]
@@ -2770,14 +2808,15 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
 // Make the dataset its own Class and loadable into GraphDB. Special handling: "dateTime", "XMLLiteral", "anyURI"
-func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
+// <<< Specify output={no data, summary, all data}
+func (iot *IoTDbCsvDataFile) Format_Ontology(dataOutputChoice int) []string {
 	baseline := getBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0
 	for _, v := range iot.Measurements {
 		ndx++
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementName + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementType)] + crlf
+		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementAlias + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementType)] + crlf
 		if ndx < len(iot.Measurements) {
 			str += `] ,`
 		} else {
@@ -2802,7 +2841,7 @@ func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
 	output = append(output, `ex:StopTimeseries`+uniqueID)
 	output = append(output, `rdf:type `+s4data+`StopTimeseries ;`)
 	output = append(output, `rdf:label "StopTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `### internel references`+crlf)
+	output = append(output, `### internal references`+crlf)
 
 	values, ok := iot.GetSummaryStatValues("mean")
 	output = append(output, `<`+DataSetPrefix+iot.DatasetName+uniqueID+`> rdf:type owl:NamedIndividual , `)
@@ -2811,16 +2850,24 @@ func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
 		for ndx := 0; ndx < len(iot.Measurements); ndx++ {
 			for _, v := range iot.Measurements {
 				if v.ColumnOrder == ndx && !v.Ignore {
-					str := s4data + v.MeasurementName + `  "` + values[ndx] + `"^^xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementType)]
+					xsd := xsdDatatypeMap[strings.ToLower(v.MeasurementType)]
+					if len(xsd) < 1 {
+						fmt.Println("  invalid type: " + v.MeasurementType)
+					}
+					if xsd == "decimal" && strings.Contains(strings.ToLower(values[ndx]), "e") { // remove Exponent
+						values[ndx] = fmt.Sprintf("%.14f", formatFloat(values[ndx]))
+					}
+					str := s4data + v.MeasurementAlias + `  "` + values[ndx] + `"^^xsd:` + xsd
 					if v.ColumnOrder < len(iot.Measurements)-1 {
 						str += ` ;`
-					} else {
-						str += ` .`
+					} else { // DatasetName
+						str = s4data + v.MeasurementAlias + ` "` + iot.DatasetName + `"^^xsd:` + xsd + ` .`
 					}
 					output = append(output, str)
 				}
 			}
 		}
+		output = append(output, "")
 	}
 	return output
 }
@@ -2919,13 +2966,14 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			fmt.Println()
 
 		case "query":
-			iot.GetTimeseriesList(iot.GroupName, iot.DatasetName)
+			iotdbTimeseriesList := iot.GetTimeseriesList(iot.GroupName, iot.DatasetName)
 			outputPath := GetOutputPath(iot.DataFilePath, ".sql")
-			err := WriteTextLines(iot.QueryResults, outputPath, false)
+			itp := IotdbTimeseriesProfile{}
+			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) // 1 was cdf.QueryResults
 			checkErr("WriteTextLines(query)", err)
 
 		case "example": // serialize saref class file:
-			ttlLines := iot.Format_Ontology()
+			ttlLines := iot.Format_Ontology(1)
 			outputPath := GetOutputPath(iot.DataFilePath, serializationExtension)
 			err := WriteTextLines(ttlLines, outputPath, false)
 			checkErr("WriteTextLines(example)", err)
