@@ -1598,7 +1598,6 @@ func ProcessTimeSeriesDatabase(programArgs []string) error {
 			itp := IotdbTimeseriesProfile{}
 			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), "./iotdb.timeseries.list", false)
 			checkErr("WriteTextLines(query)", err)
-
 		}
 		fmt.Println("Database <" + command + "> completed.")
 	} // for
@@ -2681,14 +2680,14 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 type IoTDbCsvDataFile struct {
 	IoTDbAccess
-	GroupName    string                     `json:"groupname"` // root.etsidata.GroupName
-	Description  string                     `json:"description"`
-	DataFilePath string                     `json:"datafilepath"`
-	DataFileType string                     `json:"datafiletype"`
-	DatasetName  string                     `json:"datasetname"`
-	Measurements map[string]MeasurementItem `json:"measurements"` //<<< make pointer! one less than the number of rows in summary file.
-	Summary      [][]string                 `json:"summary"`      // from summary file
-	Dataset      [][]string                 `json:"dataset"`      // actual data
+	GroupName    string                      `json:"groupname"` // root.etsidata.GroupName
+	Description  string                      `json:"description"`
+	DataFilePath string                      `json:"datafilepath"`
+	DataFileType string                      `json:"datafiletype"`
+	DatasetName  string                      `json:"datasetname"`
+	Measurements map[string]*MeasurementItem `json:"measurements"`
+	Summary      [][]string                  `json:"summary"` // from summary file
+	Dataset      [][]string                  `json:"dataset"` // actual data
 }
 
 // expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
@@ -2735,7 +2734,7 @@ func (iot *IoTDbCsvDataFile) OutputDescription(displayColumnInfo bool) string {
 }
 
 // search for either original or alias name
-func (iot *IoTDbCsvDataFile) GetMeasurementItemFromName(name string) (MeasurementItem, bool) {
+func (iot *IoTDbCsvDataFile) GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
 	item, ok := iot.Measurements[name]
 	if ok {
 		return item, true
@@ -2776,7 +2775,7 @@ func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, 
 // len() only returns the length of the "external" array.
 func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "longint", "Double": "double"}
-	iot.Measurements = make(map[string]MeasurementItem, 0)
+	iot.Measurements = make(map[string]*MeasurementItem, 0)
 	// get units column
 	unitsColumn := 0
 	for ndx := 0; ndx < len(iot.Summary[0]); ndx++ { // iterate over summary header row
@@ -2808,7 +2807,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 				ColumnOrder:      ndx,
 				Ignore:           ignore,
 			}
-			iot.Measurements[dataColumnName] = mi // add to map using original name
+			iot.Measurements[dataColumnName] = &mi // add to map using original name
 		}
 	}
 	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
@@ -2820,7 +2819,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		ColumnOrder:      ndx1,
 		Ignore:           false,
 	}
-	iot.Measurements[LastColumnName] = mi
+	iot.Measurements[LastColumnName] = &mi
 }
 
 // Return list of ordered dataset column names as string. Does not include enclosing ()
