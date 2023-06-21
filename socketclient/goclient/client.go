@@ -1,37 +1,82 @@
-// Socket client for golang: make sure local firewall isn’t blocking.
-// Golang allows for 2 socket types:
-//  1. Unix domain sockets (AF_UNIX); on same machine for interprocess communication; only the kernel is involved in the communication between processes; since domain sockets are files, the file's permissions determine who can send data to the socket.
-//  2. Network sockets (AF_INET|AF_INET6).
-//
-// Using an HTTP server with a Unix domain socket in Go can provide several advantages such as improved security, performance, ease of use, and interoperability.
-// Two kinds of unix sockets: stream (tcp) & datagram(udp; discrete data chunks).
-// What about compression, encryption, authentication.?
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"net"
+	"flag"
+	"log"
+	"net/url"
 	"os"
+	"os/signal"
+	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const (
 	SERVER_HOST = "localhost"
-	SERVER_PORT = "9988" // literal port number or service name.
+	SERVER_PORT = ":9898" // literal port number or service name.
 	SERVER_TYPE = "tcp"
 )
 
+var addr = flag.String("addr", SERVER_HOST+SERVER_PORT, "http service address")
+
 func main() {
-	conn, err := net.Dial(SERVER_TYPE, SERVER_HOST+":"+SERVER_PORT)
+	flag.Parse()
+	log.SetFlags(0)
+
+	interrupt := make(chan os.Signal, 1)
+	signal.Notify(interrupt, os.Interrupt)
+
+	u := url.URL{Scheme: "ws", Host: *addr, Path: "/echo"}
+	log.Printf("connecting to %s", u.String())
+
+	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
 	if err != nil {
-		panic(err)
+		log.Fatal("dial:", err)
 	}
-	_, err = connection.Write([]byte("Hello Server! Greetings."))
-	buffer := make([]byte, 1024)
-	mLen, err := connection.Read(buffer)
-	if err != nil {
-		fmt.Println("Error reading:", err.Error())
+	defer c.Close()
+
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for {
+			_, message, err := c.ReadMessage()
+			if err != nil {
+				log.Println("read:", err)
+				return
+			}
+			log.Printf("recv: %s", message)
+		}
+	}()
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-done:
+			return
+		case t := <-ticker.C:
+			err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
+			if err != nil {
+				log.Println("write:", err)
+				return
+			}
+		case <-interrupt:
+			log.Println("interrupt")
+
+			// Cleanly close the connection by sending a close message and then
+			// waiting (with timeout) for the server to close the connection.
+			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			if err != nil {
+				log.Println("write close:", err)
+				return
+			}
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+			}
+			return
+		}
 	}
-	fmt.Println("Received: ", string(buffer[:mLen]))
-	defer connection.Close()
 }
