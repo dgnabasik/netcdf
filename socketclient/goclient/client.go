@@ -2,10 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -18,6 +20,22 @@ const (
 )
 
 var addr = flag.String("addr", SERVER_HOST+SERVER_PORT, "http service address")
+
+func formatCommand(s1, s2 string, width int) {
+	fmt.Println(s1 + strings.Repeat(" ", width-len(s1)) + ": " + s2)
+}
+
+func printCommands() {
+	const dist1 = 45
+	fmt.Println()
+	formatCommand("Available case-sensitive commands", "", dist1)
+	formatCommand(" groups", "list available time series groups", dist1)
+	formatCommand(" group.device=<group>", "list available time series devices for a specific group. Example: group.device=synthetic", dist1)
+	formatCommand(" timeseries=<group.device>", "list the measurement names for a specifc group & device. Example: timeseries=synthetic.IoT_Weather", dist1)
+	formatCommand(" data=<group.device> interval=1s format=csv", "stream the data for a specifc group & device at 1 second intervals in CSV format. Example: data=synthetic.IoT_Weather interval=1s format=csv", dist1)
+	formatCommand(" data=<group.device> interval=5s format=json", "stream the data for a specifc group & device at 5 second intervals in JSON format. Example: data=synthetic.IoT_Weather interval=5s format=json", dist1)
+	fmt.Println()
+}
 
 func main() {
 	flag.Parse()
@@ -34,6 +52,8 @@ func main() {
 		log.Fatal("dial:", err)
 	}
 	defer c.Close()
+
+	printCommands()
 
 	done := make(chan struct{})
 
@@ -65,8 +85,7 @@ func main() {
 		case <-interrupt:
 			log.Println("interrupt")
 
-			// Cleanly close the connection by sending a close message and then
-			// waiting (with timeout) for the server to close the connection.
+			// Close the connection: send a close message, then wait for the server to close the connection.
 			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			if err != nil {
 				log.Println("write close:", err)

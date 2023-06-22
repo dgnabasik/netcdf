@@ -396,22 +396,23 @@ type MeasurementVariable struct {
 // Generic NetCDF container. Not stored in IotDB.
 type NetCDF struct {
 	IoTDbAccess
-	GroupName        string                          `json:"groupname"`  // root.etsidata.GroupName
-	Identifier       string                          `json:"identifier"` // Unique ID to distinguish among different datasets.
-	NetcdfType       string                          `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
-	Dimensions       map[string]int                  `json:"dimensions"`
-	Title            string                          `json:"title"`
-	Description      string                          `json:"description"`
-	Conventions      string                          `json:"conventions"`
-	Institution      string                          `json:"institution"`
-	Code_url         string                          `json:"code_url"`
-	Location_meaning string                          `json:"location_meaning"`
-	Datastream_name  string                          `json:"datastream_name"`
-	Input_files      string                          `json:"input_files"`
-	History          string                          `json:"history"`
-	Measurements     map[string]*MeasurementVariable `json:"measurements"`
-	HouseIndices     []string                        `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
-	LongtimeIndices  []string                        `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
+	GroupName           string                          `json:"groupname"`  // root.etsidata.GroupName
+	Identifier          string                          `json:"identifier"` // Unique ID to distinguish among different datasets.
+	NetcdfType          string                          `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
+	Dimensions          map[string]int                  `json:"dimensions"`
+	Title               string                          `json:"title"`
+	Description         string                          `json:"description"`
+	Conventions         string                          `json:"conventions"`
+	Institution         string                          `json:"institution"`
+	Code_url            string                          `json:"code_url"`
+	Location_meaning    string                          `json:"location_meaning"`
+	Datastream_name     string                          `json:"datastream_name"`
+	Input_files         string                          `json:"input_files"`
+	History             string                          `json:"history"`
+	TimeMeasurementName string                          `json:"timemeasurementname"` // index into Measurements map
+	Measurements        map[string]*MeasurementVariable `json:"measurements"`
+	HouseIndices        []string                        `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
+	LongtimeIndices     []string                        `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
 	// these are not in the source file.
 	DataFilePath string     `json:"datafilepath"`
 	DatasetName  string     `json:"datasetname"`
@@ -598,7 +599,9 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 // Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
 // <<< Specify output={no data, summary, all data}
 func (cdf NetCDF) Format_Ontology(dataOutputChoice int) []string {
-	baseline := getBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description)
+	startDate := cdf.GetNormalizedTimestamp("min")
+	endDate := cdf.GetNormalizedTimestamp("max")
+	baseline := GetBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0
@@ -688,6 +691,24 @@ func (cdf *NetCDF) getDimensionMap() map[string]int {
 		index++
 	}
 	return dimensionMap
+}
+
+// Return string-formatted value from: columnName={summaryColumnNames}, fieldName={measurement names}
+func (cdf *NetCDF) GetSummaryValue(columnName, fieldName string) string {
+	columnNames, found := cdf.GetSummaryStatValues(summaryColumnNames[0])
+	columnValues, _ := cdf.GetSummaryStatValues(columnName)
+	_, index := find(columnNames, fieldName) // exact match
+	if !found || index < 0 {
+		return ""
+	}
+	return columnValues[index]
+}
+
+// Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
+func (cdf *NetCDF) GetNormalizedTimestamp(summaryValue string) string {
+	fmt.Println(cdf.TimeMeasurementName)
+	// <<<< GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
+	return cdf.TimeMeasurementName
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -1202,15 +1223,19 @@ ic-data:DataPoint rdf:type owl:Class ;
  	  - A creation time (instant). This is the point in time when the data point was created, which is not necessarily the time for which it is valid. In the case of soft-sensors or forecasters, a data point might have been created ahead of time, in the case of a direcet measurement a data point might created at its time of validity (or at the end of its validity time interval) and in the case of an archived value the data point might have been created after the fact.
 	  - A validity time (temporal entity) which will be named \"time stamp\". The validity time is the instant or interval in time in which a specific quantity is in effect. For example a room temperature might be measured at 12:00, which means it is in effect at this very instant. A specific amount of energy might me expended within the time-slot between 12:30 and 12:45, which means that the energy measurement is in effect during this time interval.
 	  - A location or topological association. For example, a measurement might be taken in a specific room, a power avarage might have been measured by a specific meter, a forecast might be valid for a specific region or grid segment. This association is therefore not always a location."""@en ;
-
 */
 
-//	@prefix org: <https://schema.org/> //
-//
-// Excluded "s4ehaw:MeasurementFunction": ,
-// Excluded "s4ehaw:Data rdf:type owl:Class .` + crlf +
-// Excluded "rdf:type owl:Restriction owl:onProperty saref:measurementMadeBy owl:someValuesFrom saref:Device" because don't know Device.
-func getBaselineOntology(identifier, title, description string) string {
+/* https://www.w3.org/TR/vocab-dcat-3/#basic-example
+ex:dataset-001
+  a dcat:Dataset ;
+	...
+  dcat:temporalResolution "P1D"^^xsd:duration ;
+  dcat:distribution ex:dataset-001-csv ;
+  .
+*/
+
+// @prefix org: <https://schema.org/>
+func GetBaselineOntology(identifier, title, description, startDate, endDate string) string {
 	return `@prefix ` + s4data + ` <` + DataSetPrefix + `> .` + crlf +
 		`@prefix ex: <` + DataSetPrefix + identifier + serializationExtension + `> .` + crlf +
 		`@prefix ic-data: <http://ontology.tno.nl/interconnect/datapoint#> .` + crlf +
@@ -1227,17 +1252,26 @@ func getBaselineOntology(identifier, title, description string) string {
 		`@prefix s4envi: <` + SarefEtsiOrg + `saref4envi/> .` + crlf +
 		`@prefix s4auto: <` + SarefEtsiOrg + `saref4auto/> .` + crlf +
 		`<` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> rdf:type owl:Ontology ;` + crlf +
-		`    owl:versionInfo "v3.1.1" ;` + crlf +
-		`    owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
+		` owl:versionInfo "v3.1.1" ;` + crlf +
+		` owl:versionIRI <https://saref.etsi.org/core/v3.1.1/> ;` + crlf +
 		`dcterms:title "` + title + `"@en ;` + crlf +
 		`dcterms:description "` + description + `"@en ;` + crlf +
 		`dcterms:license <https://forge.etsi.org/etsi-software-license> ;` + crlf +
+		`dcterms:language <http://id.loc.gov/vocabulary/iso639-1/en> ;` + crlf +
+		`dcterms:creator <` + SarefEtsiOrg + `saref4data/> .` + crlf +
+		`dcterms:publisher <` + SarefEtsiOrg + `saref4data/> .` + crlf +
+		`dcterms:issued "` + GetDateStr(time.Now()) + `"^^xsd:date ;` + crlf +
+		`dcterms:temporal [ a dcterms:PeriodOfTime ;` + crlf +
+		` dcat:startDate "` + startDate + `"^^xsd:date ; ` + crlf +
+		` dcat:endDate   "` + endDate + `"^^xsd:date ;` + crlf +
+		`];` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf + // include every referenced extension!
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
 		crlf + crlf +
+
 		// extension class declarations for domains, ranges, rdfs:isDefinedBy
 		`###  http://www.w3.org/2006/time#TemporalEntity` + crlf +
 		`time:TemporalEntity rdf:type owl:Class .` + crlf +
@@ -1436,9 +1470,6 @@ func getExternalReferences() string {
 		`ic-data:TimeSeries a owl:Class .` + crlf +
 		`s4envi:FrequencyUnit a owl:Class .` + crlf +
 		`s4envi:FrequencyMeasurement a owl:Class .` + crlf +
-		//`s4ehaw:MeasurementFunction a owl:Class .` + crlf +
-		//`s4ehaw:Data a owl:Class .` + crlf +
-		//`s4ehaw:hasTimeSeriesMeasurement a owl:ObjectProperty .` + crlf // this is the only external ObjectProperty
 		`s4envi:FrequencyUnit a owl:Class .` + crlf +
 		`s4envi:FrequencyMeasurement a owl:Class .` + crlf +
 		`s4auto:Confidence a owl:Class .` + crlf
@@ -2595,6 +2626,11 @@ func getStartTimeFromString(someTime string) (time.Time, error) {
 	return t, nil
 }
 
+// Return yyyy-MM-dd
+func GetDateStr(t time.Time) string {
+	return t.Format("2006-01-02")
+}
+
 // Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
 // (client.TSDataType, client.TSEncoding, client.TSCompressionType)  Make all compression SNAPPY
 func getClientStorage(dataColumnType string) (string, string, string) {
@@ -2680,14 +2716,15 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 type IoTDbCsvDataFile struct {
 	IoTDbAccess
-	GroupName    string                      `json:"groupname"` // root.etsidata.GroupName
-	Description  string                      `json:"description"`
-	DataFilePath string                      `json:"datafilepath"`
-	DataFileType string                      `json:"datafiletype"`
-	DatasetName  string                      `json:"datasetname"`
-	Measurements map[string]*MeasurementItem `json:"measurements"`
-	Summary      [][]string                  `json:"summary"` // from summary file
-	Dataset      [][]string                  `json:"dataset"` // actual data
+	GroupName           string                      `json:"groupname"` // root.etsidata.GroupName
+	Description         string                      `json:"description"`
+	DataFilePath        string                      `json:"datafilepath"`
+	DataFileType        string                      `json:"datafiletype"`
+	DatasetName         string                      `json:"datasetname"`
+	TimeMeasurementName string                      `json:"timemeasurementname"` // index into Measurements map
+	Measurements        map[string]*MeasurementItem `json:"measurements"`
+	Summary             [][]string                  `json:"summary"` // from summary file
+	Dataset             [][]string                  `json:"dataset"` // actual data
 }
 
 // expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
@@ -2748,6 +2785,7 @@ func (iot *IoTDbCsvDataFile) GetMeasurementItemFromName(name string) (*Measureme
 }
 
 // Return all column values except header row. Return false if column name not found. Fill in default values.
+// columnName={summaryColumnNames}
 func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, bool) {
 	_, columnIndex := find(summaryColumnNames, columnName)
 	if columnIndex < 0 {
@@ -2769,6 +2807,24 @@ func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, 
 		}
 	}
 	return stats, true
+}
+
+// Return string-formatted value from: columnName={summaryColumnNames}, fieldName={measurement names}
+func (iot *IoTDbCsvDataFile) GetSummaryValue(columnName, fieldName string) string {
+	columnNames, found := iot.GetSummaryStatValues(summaryColumnNames[0])
+	columnValues, _ := iot.GetSummaryStatValues(columnName)
+	_, index := find(columnNames, fieldName) // exact match
+	if !found || index < 0 {
+		return ""
+	}
+	return columnValues[index]
+}
+
+// Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
+func (iot *IoTDbCsvDataFile) GetNormalizedTimestamp(summaryValue string) string {
+	fmt.Println(iot.TimeMeasurementName)
+	// <<<< GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
+	return iot.TimeMeasurementName
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -2854,9 +2910,12 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
 // Make the dataset its own Class and loadable into GraphDB. Special handling: "dateTime", "XMLLiteral", "anyURI"
-// <<< Specify output={no data, summary, all data}
+// <<< Specify output={no data, summary, all data}  Expect timestamp as first measurement row.
 func (iot *IoTDbCsvDataFile) Format_Ontology(dataOutputChoice int) []string {
-	baseline := getBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description)
+	//<<<< opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	ecobee:3:units=yyyy-MM-dd hh:mm:ss	HomeC:2:units=unixutc	ton.iot:2:units=unixutc
+	startDate := iot.GetNormalizedTimestamp("min")
+	endDate := iot.GetNormalizedTimestamp("max")
+	baseline := GetBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)
 	ndx := 0

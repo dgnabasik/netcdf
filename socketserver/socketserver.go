@@ -1,5 +1,6 @@
 // Create a separate Goroutine to serve each TCP client.  Execute netcat to test: nc 127.0.0.1 <port>
 // lsof -Pnl +M -i4	or -i6		netstat -tulpn
+// sudo nmap localhost => 9898/tcp open  monkeycom  (because it uses gorilla/websocket - haha)
 package main
 
 import (
