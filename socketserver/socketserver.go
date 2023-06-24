@@ -5,21 +5,26 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"html/template"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/gorilla/websocket"
 )
 
 const (
+	timeFormat    = "2006-01-02 15:04:05" // RFC3339 format.
+	EtsidataRoot  = "root.etsidata"
 	WSHOST        = "localhost" // if not specified, the function listens on all available unicast and anycast IP addresses of the local system.
 	SERVER_TYPE   = "tcp4"      // tcp, tcp4, tcp6, unix, or unix packet
 	jsonExtension = ".json"
@@ -28,66 +33,18 @@ const (
 
 var WSPORT string = ":9898" // override in main()
 var addr = flag.String("addr", WSHOST+WSPORT, "http service address")
-var clients = make(map[*websocket.Conn]bool)
+var iotdbParameters IoTDbProgramParameters
+var clientConfig *client.Config
 
 // for both IotDB & GraphDB.
-var databaseCommands = []string{"login=<my name>", "groups", "group.device=<group>", "timeseries=<group.device>", "data=<group.device> interval=<1s> format=<csv>", "logout"}
+var databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-
-// Limit the buffer sizes to the maximum expected message size.
-var upgrader = websocket.Upgrader{ //  EnableCompression: true,
-	ReadBufferSize:  256,
-	WriteBufferSize: 4096,
-}
 
 // for javascript client
 func homePage(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Home Page")
 }
-
-// Check if incoming request from a different domain is allowed to connect; get CORS.
-// Connections support one concurrent reader and one concurrent writer.
-// The server must enforce an origin policy using the Origin request header sent by the browser.
-func wsEndpoint(w http.ResponseWriter, r *http.Request) {
-	// TODO: check the Origin header before calling upgrader.CheckOrigin.
-	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
-	ws, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Println(err)
-	}
-
-	log.Println("Client connected.")
-	err = ws.WriteMessage(1, []byte("Available commands: "+strings.Join(databaseCommands, "; ")))
-	if err != nil {
-		log.Println(err)
-	}
-	reader(ws)
-}
-
-func setupRoutes() {
-	http.HandleFunc("/", homePage) // http.FileServer(http.Dir("./jsclient"))
-	http.HandleFunc("/ws", wsEndpoint)
-}
-
-// Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage. The interpretation of binary messages is left to the application.
-// The WebSocket protocol defines three types of control messages: close, ping, pong.
-func reader(conn *websocket.Conn) {
-	for {
-		messageType, p, err := conn.ReadMessage()
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		fmt.Println(string(p)) //<<<
-		if err := conn.WriteMessage(messageType, p); err != nil {
-			log.Println(err)
-			return
-		}
-	}
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
 
 // abort
 func checkErr(title string, err error) {
@@ -105,6 +62,71 @@ func FileExists(filePath string) (bool, error) {
 		return false, nil
 	}
 	return !info.IsDir(), err
+}
+
+func testRemoteAddressPortsOpen(host string, ports []string) (bool, error) {
+	for _, port := range ports {
+		timeout := time.Second
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, port), timeout)
+		if err != nil {
+			return false, err
+		}
+		checkErr("testRemoteAddressPortsOpen(connection error)", err)
+		if conn != nil {
+			defer conn.Close()
+			fmt.Println("Connected to IoTDB at ", net.JoinHostPort(host, port))
+		}
+	}
+	return true, nil
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+type IoTDbProgramParameters struct {
+	Host     string `json:"host"`
+	Port     string `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+}
+
+// First read environment variables: IOTDB_PASSWORD, IOTDB_USER, IOTDB_HOST, IOTDB_PORT; then read override parameters from command-line.
+// Assigns global iotdbParameters and returns client.Config. iotdbParameters is a superset of client.Config.
+func configureIotdbAccess() *client.Config {
+	iotdbParameters = IoTDbProgramParameters{
+		Host:     os.Getenv("IOTDB_HOST"),
+		Port:     os.Getenv("IOTDB_PORT"),
+		User:     os.Getenv("IOTDB_USER"),
+		Password: os.Getenv("IOTDB_PASSWORD"),
+	}
+	envFound := len(iotdbParameters.Host) > 0 && len(iotdbParameters.Port) > 0
+	if !envFound {
+		flag.StringVar(&iotdbParameters.Host, "host", "127.0.0.1", "--host=10.103.4.83")
+		flag.StringVar(&iotdbParameters.Port, "port", "6667", "--port=6667") // sudo netstat -peanut | grep 6667 ==> 3 lines
+		flag.StringVar(&iotdbParameters.User, "user", "root", "--user=root")
+		flag.StringVar(&iotdbParameters.Password, "password", "root", "--password=root")
+		flag.Parse()
+	}
+	config := &client.Config{
+		Host:     iotdbParameters.Host,
+		Port:     iotdbParameters.Port,
+		UserName: iotdbParameters.User,
+		Password: iotdbParameters.Password,
+	}
+	return config
+}
+
+// Assigns global clientConfig.
+func Init_IoTDB(testIotdbAccess bool) (string, bool) {
+	fmt.Println("Initializing IoTDB client...")
+	clientConfig = configureIotdbAccess()
+	isOpen, err := testRemoteAddressPortsOpen(clientConfig.Host, []string{clientConfig.Port})
+	connectStr := clientConfig.Host + ":" + clientConfig.Port
+	if testIotdbAccess && !isOpen {
+		fmt.Printf("%s%v%s", "Expected IoTDB to be available at "+connectStr+" but got ERROR: ", err, "\n")
+		fmt.Printf("Please execute:  cd ~/iotdb && sbin/start-standalone.sh && sbin/start-cli.sh -h 127.0.0.1 -p 6667 -u root -pw root")
+		return connectStr, false
+	}
+	return connectStr, true
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -160,15 +182,48 @@ type IotdbTimeseriesProfile struct {
 	DeadbandParameters string `json:"deadbandparameters"`
 }
 
-type IoTDbAccess struct {
-	session            client.Session
-	Sql                string   `json:"sql"`
-	ActiveSession      bool     `json:"activesession"`
-	TimeseriesCommands []string `json:"timeseriescommands"` // given as command-line parameters
-	QueryResults       []string `json:"queryresults"`
+// Returns [groupName.deviceName.measurementName]  	Skip Alias,Database,Tags|Attributes|Deadband|DeadbandParameters
+func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfile) []string {
+	const cwidth0 = 100
+	const cwidth1 = 10
+	const sep = "|"
+	output := make([]string, len(list)+1)
+	output[0] = "                                     Timeseries |DataType|Encoding|Compress|"
+	for ndx := 0; ndx < len(list); ndx++ {
+		item0 := strings.Repeat(" ", cwidth0-len(list[ndx].Timeseries)) + list[ndx].Timeseries + sep
+		item2 := strings.Repeat(" ", cwidth1-len(list[ndx].DataType)) + list[ndx].DataType + sep
+		item3 := strings.Repeat(" ", cwidth1-len(list[ndx].Encoding)) + list[ndx].Encoding + sep
+		item4 := strings.Repeat(" ", cwidth1-len(list[ndx].Compression)) + list[ndx].Compression + sep
+		output[ndx+1] = item0 + item2 + item3 + item4
+	}
+
+	return output
 }
 
-func printDataSet(sds *client.SessionDataSet) []string {
+///////////////////////////////////////////////////////////////////////////////////////////
+
+type IoTDbAccess struct {
+	session            client.Session
+	Sql                string                   `json:"sql"`
+	ActiveSession      bool                     `json:"activesession"`
+	TimeseriesCommands []string                 `json:"timeseriescommands"` // given as command-line parameters
+	QueryResults       []string                 `json:"queryresults"`       // every message the client will ever get
+	socketserver       *websocket.Conn          // new fields
+	UserName           string                   `json:"username"`
+	TimeseriesList     []IotdbTimeseriesProfile `json:"timeserieslist"`
+	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
+}
+
+// No header returned
+func (iotAccess *IoTDbAccess) Format_Timeseries() {
+	iotAccess.QueryResults = make([]string, len(iotAccess.TimeseriesList))
+	for ndx := 0; ndx < len(iotAccess.TimeseriesList); ndx++ {
+		iotAccess.QueryResults[ndx] = strings.Replace(iotAccess.TimeseriesList[ndx].Timeseries, EtsidataRoot+".", "", 1)
+	}
+	fmt.Println(len(iotAccess.QueryResults)) //<<<
+}
+
+func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string {
 	const tab = "\t"
 	output := make([]string, 0)
 	showTimestamp := !sds.IsIgnoreTimeStamp()
@@ -198,31 +253,24 @@ func printDataSet(sds *client.SessionDataSet) []string {
 	return output
 }
 
-/* <<<<
-
-// Returns [groupName.deviceName.measurementName]
-func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfile) []string {
-	output := make([]string, len(list))
-	for ndx := range list {
-		output[ndx] = strings.Replace(list[ndx].Timeseries, EtsidataRoot+".", "", 1)
-	}
-	return output
-}
-
-iotdbTimeseriesList := iot.GetTimeseriesList([]string{iot.GroupName + "."}, iot.DatasetName+".")
-
-// Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
+// Assign iotAccess.[]IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName string) []IotdbTimeseriesProfile {
+func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName string) {
+	if err := clients.session.Open(false, 0); err != nil {
+		checkErr("GetTimeseriesList: ", err)
+	}
+	defer clients.session.Close()
+
 	var timeout int64 = 1000
 	const blockSize = 11
-	timeseriesList := make([]IotdbTimeseriesProfile, 0) // want multiples of this number
+	iotAccess.TimeseriesList = make([]IotdbTimeseriesProfile, 0) // want multiples of this number
 	timeseriesItem := IotdbTimeseriesProfile{}
 	for groupIndex := 0; groupIndex < len(groupNames); groupIndex++ {
 		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
+		fmt.Println(iotAccess.Sql)
 		sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 		if err == nil {
-			lines := printDataSet(sessionDataSet)
+			lines := iotAccess.PrintDataSet(sessionDataSet)
 			for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
 				if ndx > (blockSize - 1) {
 					index := ndx % blockSize
@@ -250,7 +298,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName
 					case 9:
 						timeseriesItem.DeadbandParameters = line
 					case 10:
-						timeseriesList = append(timeseriesList, timeseriesItem)
+						iotAccess.TimeseriesList = append(iotAccess.TimeseriesList, timeseriesItem)
 					}
 				}
 			}
@@ -259,33 +307,114 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName
 			checkErr("iotAccess.GetTimeseriesList("+datasetName+")", err)
 		}
 	} // for groupIndex
+}
 
-	// format/assign iotAccess.QueryResults
-	const cwidth0 = 100
-	const cwidth1 = 10
-	const sep = "|"
-	iotAccess.QueryResults = make([]string, 0) // skip Alias,Database,Tags|Attributes|Deadband|DeadbandParameters
-	iotAccess.QueryResults = append(iotAccess.QueryResults, "                                     Timeseries |DataType|Encoding|Compress|")
-	for ndx := 0; ndx < len(timeseriesList); ndx++ {
-		item0 := strings.Repeat(" ", cwidth0-len(timeseriesList[ndx].Timeseries)) + timeseriesList[ndx].Timeseries + sep
-		item2 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].DataType)) + timeseriesList[ndx].DataType + sep
-		item3 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].Encoding)) + timeseriesList[ndx].Encoding + sep
-		item4 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].Compression)) + timeseriesList[ndx].Compression + sep
-		iotAccess.QueryResults = append(iotAccess.QueryResults, item0+item2+item3+item4)
+// map to databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
+func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
+	tokens := strings.Split(clientCommand, " ")
+	baseCommand := strings.ToLower(tokens[0])
+	switch baseCommand {
+	case "login":
+		iotAccess.ActiveSession = true
+		iotAccess.UserName = tokens[1]
+		iotAccess.QueryResults = []string{iotAccess.UserName + "successfully logged in at " + time.Now().Format(timeFormat)}
+
+	case "groups":
+		iotAccess.GetTimeseriesList([]string{""}, "*")
+		iotAccess.Format_Timeseries()
+
+	case "group.device":
+		tokens2 := strings.Split(tokens[1], ".")
+		groupName := tokens2[0]
+		datasetName := tokens2[1]
+		iotAccess.GetTimeseriesList([]string{groupName}, datasetName)
+		iotAccess.Format_Timeseries()
+
+	case "timeseries": // <group.device>
+		tokens2 := strings.Split(tokens[1], ".")
+		groupName := tokens2[0]
+		datasetName := tokens2[1]
+		iotAccess.GetTimeseriesList([]string{groupName}, datasetName)
+		iotAccess.Format_Timeseries()
+
+	case "data": //<<<< <group.device> interval <1s> format <csv>"
+
+	case "logout":
+		iotAccess.ActiveSession = false
+		iotAccess.QueryResults = []string{"thank you ... logging out at " + time.Now().Format(timeFormat)}
+
+	default:
+		iotAccess.QueryResults = []string{"invalid command"}
+	}
+}
+
+// Check if incoming request from a different domain is allowed to connect; get CORS.
+// Connections support one concurrent reader and one concurrent writer.
+// The server must enforce an origin policy using the Origin request header sent by the browser.
+func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request) {
+	// Limit the buffer sizes to the maximum expected message size.
+	var upgrader = websocket.Upgrader{ //  EnableCompression: true,
+		ReadBufferSize:  256,
+		WriteBufferSize: 4096,
 	}
 
-	return timeseriesList
+	// TODO: check the Origin header before calling upgrader.CheckOrigin.
+	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
+	iotAccess.socketserver, _ = upgrader.Upgrade(w, r, nil)
+	log.Println("Client connected.") // 1=TextMessage
+	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(databaseCommands, "; ")))
+	if err != nil {
+		log.Println(err)
+	}
+	iotAccess.reader()
 }
-*/
+
+// Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage. The interpretation of binary messages is left to the application.
+// The WebSocket protocol defines three types of control messages: close, ping, pong.
+func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
+	for {
+		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage()
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		fmt.Println("reader: " + string(clientRequest))
+		iotAccess.RoutingParser(string(clientRequest))
+		for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
+			message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
+			if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil {
+				log.Println(err)
+				return
+			}
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+var clients IoTDbAccess
+
+//var clients = make(map[*websocket.Conn]bool)
+
+func setupRoutes() {
+	iotdbConnection, ok := Init_IoTDB(true)
+	if !ok {
+		checkErr("Init_IoTDB: ", errors.New(iotdbConnection))
+	}
+	clients = IoTDbAccess{ActiveSession: true, session: client.NewSession(clientConfig)}
+
+	http.HandleFunc("/", homePage) // http.FileServer(http.Dir("./jsclient"))
+	http.HandleFunc("/ws", clients.wsEndpoint)
+	fmt.Println("Routes established.")
+}
 
 func main() {
 	flag.Parse()
 	log.SetFlags(0)
-	WSPORT := os.Getenv("WSPORT")
-	setupRoutes()
+	WSPORT := ":" + os.Getenv("WSPORT")
 	fmt.Println("The socketserver program only reads from the the IoT and Graph databases.")
-	fmt.Println("The client programs display the available commands to the server.")
 	fmt.Println("Server is listening on " + WSHOST + WSPORT + " ...")
+	setupRoutes()
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 

@@ -115,7 +115,7 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 // for both IotDB & GraphDB.
-var databaseCommands = []string{"login=<my name>", "groups", "group.device=<group>", "timeseries=<group.device>", "data=<group.device> interval=<1s> format=<csv>", "logout"}
+var databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
 
 // Separate struct if we want slice of these in container class.
 // Keep these field names different from container structs to avoid confusion.
@@ -1566,34 +1566,6 @@ func LoadHd5SensorDataIntoDatabase(programArgs []string) {
 	// <<<
 }
 
-func ProcessTimeSeriesDatabase(programArgs []string) error {
-	createSession := CreateIotSession(programArgs)
-	iotdb := IoTDbAccess{ActiveSession: createSession, session: client.NewSession(clientConfig)}
-	if err := iotdb.session.Open(false, 0); err != nil {
-		checkErr("ProcessTimeseriesDatabase: ", err)
-	}
-	defer iotdb.session.Close()
-
-	fmt.Println("Processing time series database commands ...")
-	iotdb.TimeseriesCommands = GetTimeseriesCommands(programArgs)
-	for _, command := range iotdb.TimeseriesCommands {
-		switch command {
-		case "groups": //<<< all timeseries
-			iotdbTimeseriesList := iotdb.GetTimeseriesList([]string{""}, "*")
-			itp := IotdbTimeseriesProfile{}
-			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), "./iotdb.timeseries.list", false)
-			checkErr("WriteTextLines(query)", err)
-		}
-		fmt.Println("Database <" + command + "> completed.")
-	} // for
-
-	return nil
-}
-
-func ProcessGraphDatabase(programArgs []string) {
-	// <<<
-}
-
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
 func main() {
 	//fmt.Println(ShowLastExternalBackup())
@@ -1609,10 +1581,6 @@ func main() {
 		LoadNcSensorDataIntoDatabase(os.Args)
 	case ".hd5":
 		LoadHd5SensorDataIntoDatabase(os.Args)
-	case ".iotdb":
-		ProcessTimeSeriesDatabase(os.Args)
-	case ".graphdb":
-		ProcessGraphDatabase(os.Args)
 	default:
 		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT and Graph databases.")
 		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
