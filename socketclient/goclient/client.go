@@ -19,6 +19,9 @@ const (
 	SERVER_TYPE = "tcp"
 )
 
+/*
+https://medium.com/swlh/handle-concurrency-in-gorilla-web-sockets-ade4d06acd9c
+*/
 var addr = flag.String("addr", SERVER_HOST+SERVER_PORT, "http service address")
 
 func formatCommand(s1, s2 string, width int) {
@@ -29,11 +32,13 @@ func printCommands() {
 	const dist1 = 45
 	fmt.Println()
 	formatCommand("Available case-sensitive commands", "", dist1)
+	formatCommand(" login=<my name>", "login to the streaming data server", dist1)
 	formatCommand(" groups", "list available time series groups", dist1)
 	formatCommand(" group.device=<group>", "list available time series devices for a specific group. Example: group.device=synthetic", dist1)
 	formatCommand(" timeseries=<group.device>", "list the measurement names for a specifc group & device. Example: timeseries=synthetic.IoT_Weather", dist1)
 	formatCommand(" data=<group.device> interval=1s format=csv", "stream the data for a specifc group & device at 1 second intervals in CSV format. Example: data=synthetic.IoT_Weather interval=1s format=csv", dist1)
 	formatCommand(" data=<group.device> interval=5s format=json", "stream the data for a specifc group & device at 5 second intervals in JSON format. Example: data=synthetic.IoT_Weather interval=5s format=json", dist1)
+	formatCommand(" logout", "stop sending me data; I have a headache", dist1)
 	fmt.Println()
 }
 

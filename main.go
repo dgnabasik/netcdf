@@ -30,7 +30,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 
 	//"math/rand"
@@ -63,7 +62,6 @@ const ( // these do not include trailing >
 	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
 	serializationExtension = ".ttl" //trig<<< Classic Turtle does not support named graphs. Must output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
-	jsonExtension          = ".json"
 	csvExtension           = ".csv"
 	varExtension           = ".var"
 	ncExtension            = ".nc"
@@ -91,41 +89,6 @@ Gamma distribution: Describes the time to wait for a fixed number of events.
 Weibull Distribution: Describes a waiting time for one event, if that event becomes more or less likely with time.
 */
 
-type TimeseriesMetadata struct { // <<<
-	Description string `json:"description"`
-}
-
-func (tsmd *TimeseriesMetadata) ReadJsonFile(filename string) (TimeseriesMetadata, error) {
-	funcName := "TimeseriesMetadata.ReadJsonFile"
-	file, err := os.Open(filename)
-	checkErr(funcName, err)
-	defer file.Close()
-
-	byteValue, err := io.ReadAll(file)
-	checkErr(funcName, err)
-
-	var data TimeseriesMetadata
-	err = json.Unmarshal(byteValue, &data)
-	checkErr(funcName, err)
-
-	return data, nil
-}
-
-func GetTimeseriesMetadata(filePath string) (TimeseriesMetadata, bool) {
-	found, _ := FileExists(filePath)
-	tsmd := TimeseriesMetadata{Description: "not defined"}
-	if !found {
-		return tsmd, false
-	}
-	tsmd, _ = tsmd.ReadJsonFile(filePath)
-	return tsmd, true
-}
-
-func GetMetadataFilename(dataFilePath string) string {
-	fileName := filepath.Base(dataFilePath)
-	return filepath.Dir(dataFilePath) + "/metadata_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + jsonExtension
-}
-
 func GetSummaryFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
 	return filepath.Dir(dataFilePath) + "/summary_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + csvExtension
@@ -152,7 +115,7 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 ///////////////////////////////////////////////////////////////////////////////////////////
 
 // for both IotDB & GraphDB.
-var databaseCommands = []string{"list"}
+var databaseCommands = []string{"login=<my name>", "groups", "group.device=<group>", "timeseries=<group.device>", "data=<group.device> interval=<1s> format=<csv>", "logout"}
 
 // Separate struct if we want slice of these in container class.
 // Keep these field names different from container structs to avoid confusion.
@@ -162,16 +125,6 @@ type IoTDbAccess struct {
 	ActiveSession      bool     `json:"activesession"`
 	TimeseriesCommands []string `json:"timeseriescommands"` // given as command-line parameters
 	QueryResults       []string `json:"queryresults"`
-}
-
-func (iotAccess *IoTDbAccess) GetTimeseriesCommands(programArgs []string) {
-	iotAccess.TimeseriesCommands = make([]string, 0)
-	for ndx := range programArgs {
-		cmd, index := find(databaseCommands, strings.ToLower(programArgs[ndx]))
-		if index >= 0 {
-			iotAccess.TimeseriesCommands = append(iotAccess.TimeseriesCommands, strings.ToLower(cmd))
-		}
-	}
 }
 
 // Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
@@ -348,6 +301,7 @@ func WriteStringToFile(filePath, str string) error {
 	return err
 }
 
+// <<< Check against databaseCommands.
 func GetTimeseriesCommands(programArgs []string) []string {
 	timeseriesCommands := make([]string, 0)
 	for ndx := range programArgs {
@@ -401,7 +355,7 @@ type NetCDF struct {
 	NetcdfType          string                          `json:"netcdftype"` // /usr/bin/ncdump -k cdf.nc ==> NetcdfFileFormats
 	Dimensions          map[string]int                  `json:"dimensions"`
 	Title               string                          `json:"title"`
-	Description         string                          `json:"description"`
+	Description         string                          `json:"description"` // dummy
 	Conventions         string                          `json:"conventions"`
 	Institution         string                          `json:"institution"`
 	Code_url            string                          `json:"code_url"`
@@ -695,20 +649,21 @@ func (cdf *NetCDF) getDimensionMap() map[string]int {
 
 // Return string-formatted value from: columnName={summaryColumnNames}, fieldName={measurement names}
 func (cdf *NetCDF) GetSummaryValue(columnName, fieldName string) string {
-	columnNames, found := cdf.GetSummaryStatValues(summaryColumnNames[0])
-	columnValues, _ := cdf.GetSummaryStatValues(columnName)
+	columnNames, found1 := cdf.GetSummaryStatValues(summaryColumnNames[0])
+	columnValues, found2 := cdf.GetSummaryStatValues(columnName)
 	_, index := find(columnNames, fieldName) // exact match
-	if !found || index < 0 {
+	if !found1 || !found2 || index < 0 {
 		return ""
 	}
 	return columnValues[index]
 }
 
 // Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
+// <<<< TimeMeasurementName: {ecobee:3:units=yyyy-MM-dd hh:mm:ss}
 func (cdf *NetCDF) GetNormalizedTimestamp(summaryValue string) string {
 	fmt.Println(cdf.TimeMeasurementName)
-	// <<<< GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
-	return cdf.TimeMeasurementName
+	//  GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
+	return GetDateStr(time.Now())
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -1567,12 +1522,11 @@ func isAccessibleSensorDataFile(dataFilePath string) error {
 }
 
 func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, error) {
-	fileType := programArgs[2]                                                // subtype of *.nc file.
-	outputPath := GetOutputPath(programArgs[1], "")                           // path has no extension
-	datasetName := path.Base(outputPath)                                      // Jan_clean
-	metadata, _ := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1])) // found
+	fileType := programArgs[2]                      // subtype of *.nc file.
+	outputPath := GetOutputPath(programArgs[1], "") // path has no extension
+	datasetName := path.Base(outputPath)            // Jan_clean
 	isAccessibleSensorDataFile(programArgs[1])
-	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, metadata.Description, programArgs, isActive)
+	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, datasetName, programArgs, isActive)
 	checkErr("ParseVariableFile", err)
 	//fmt.Println(xcdf.ToString(true)) // true => output variables
 
@@ -1621,10 +1575,10 @@ func ProcessTimeSeriesDatabase(programArgs []string) error {
 	defer iotdb.session.Close()
 
 	fmt.Println("Processing time series database commands ...")
-	iotdb.GetTimeseriesCommands(programArgs)
+	iotdb.TimeseriesCommands = GetTimeseriesCommands(programArgs)
 	for _, command := range iotdb.TimeseriesCommands {
 		switch command {
-		case "list": // all timeseries
+		case "groups": //<<< all timeseries
 			iotdbTimeseriesList := iotdb.GetTimeseriesList([]string{""}, "*")
 			itp := IotdbTimeseriesProfile{}
 			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), "./iotdb.timeseries.list", false)
@@ -1660,11 +1614,11 @@ func main() {
 	case ".graphdb":
 		ProcessGraphDatabase(os.Args)
 	default:
-		fmt.Println("Required *.csv parameters: path to csv sensor data file plus any time series command: {drop create delete insert example}.")
-		fmt.Println("The csv summary file produced by 'xsv stats <dataFile.csv> --everything' should already exist in the same folder as <dataFile.csv>,")
-		fmt.Println("including a description.txt file. All static time series data sits in the {" + EtsidataRoot + "} database.")
-		fmt.Println("Required *.nc parameters: 1) path to single *.nc & *.var files, and 2) CDF file type {HDF5, netCDF-4, classic}.")
-		fmt.Println("  Optionally specify the unique dataset identifier; e.g. Entity_clean_5min")
+		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT and Graph databases.")
+		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
+		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
+		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
+		fmt.Println("All time series data is inserted into the {" + EtsidataRoot + "} database.")
 		os.Exit(0)
 	}
 }
@@ -2729,19 +2683,15 @@ type IoTDbCsvDataFile struct {
 
 // expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
 func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvDataFile, error) {
-	//datasetPathName := filepath.Dir(programArgs[1]) // does not include trailing slash
 	datasetName := filepath.Base(programArgs[1]) // includes extension
 	datasetName = strings.Replace(datasetName, csvExtension, "", 1)
-	metadata, _ := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1])) // found
 	isAccessibleSensorDataFile(programArgs[1])
 	ioTDbAccess := IoTDbAccess{ActiveSession: isActive}
-	iotdbDataFile := IoTDbCsvDataFile{IoTDbAccess: ioTDbAccess, Description: metadata.Description, DataFilePath: programArgs[1], DatasetName: datasetName}
+	iotdbDataFile := IoTDbCsvDataFile{IoTDbAccess: ioTDbAccess, Description: datasetName, DataFilePath: programArgs[1], DatasetName: datasetName}
 	iotdbDataFile.TimeseriesCommands = GetTimeseriesCommands(programArgs)
 	err := iotdbDataFile.ReadCsvFile(GetSummaryFilename(iotdbDataFile.DataFilePath), false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	iotdbDataFile.XsvSummaryTypeMap()
-	//fmt.Println(iotdbDataFile.OutputDescription(true))
-	//<<< read sensor data from IotDB if available, else CSV file.
 	err = iotdbDataFile.ReadCsvFile(iotdbDataFile.DataFilePath, true) // isDataset: yes
 	checkErr("ReadCsvFile ", err)
 	return iotdbDataFile, nil
@@ -2811,20 +2761,21 @@ func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, 
 
 // Return string-formatted value from: columnName={summaryColumnNames}, fieldName={measurement names}
 func (iot *IoTDbCsvDataFile) GetSummaryValue(columnName, fieldName string) string {
-	columnNames, found := iot.GetSummaryStatValues(summaryColumnNames[0])
-	columnValues, _ := iot.GetSummaryStatValues(columnName)
+	columnNames, found1 := iot.GetSummaryStatValues(summaryColumnNames[0])
+	columnValues, found2 := iot.GetSummaryStatValues(columnName)
 	_, index := find(columnNames, fieldName) // exact match
-	if !found || index < 0 {
+	if !found1 || !found2 || index < 0 {
 		return ""
 	}
 	return columnValues[index]
 }
 
 // Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
+// <<<< TimeMeasurementName: {opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	HomeC:2:units=unixutc	ton.iot:2:units=unixutc}
 func (iot *IoTDbCsvDataFile) GetNormalizedTimestamp(summaryValue string) string {
 	fmt.Println(iot.TimeMeasurementName)
-	// <<<< GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
-	return iot.TimeMeasurementName
+	// GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
+	return GetDateStr(time.Now())
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -2912,7 +2863,6 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 // Make the dataset its own Class and loadable into GraphDB. Special handling: "dateTime", "XMLLiteral", "anyURI"
 // <<< Specify output={no data, summary, all data}  Expect timestamp as first measurement row.
 func (iot *IoTDbCsvDataFile) Format_Ontology(dataOutputChoice int) []string {
-	//<<<< opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	ecobee:3:units=yyyy-MM-dd hh:mm:ss	HomeC:2:units=unixutc	ton.iot:2:units=unixutc
 	startDate := iot.GetNormalizedTimestamp("min")
 	endDate := iot.GetNormalizedTimestamp("max")
 	baseline := GetBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description, startDate, endDate)
