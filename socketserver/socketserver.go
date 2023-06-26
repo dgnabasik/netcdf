@@ -37,7 +37,7 @@ var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
 // for both IotDB & GraphDB.
-var databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
+var databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "count <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -131,7 +131,7 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-type TimeseriesMetadata struct { // <<<
+type TimeseriesMetadata struct {
 	Description string `json:"description"`
 }
 
@@ -214,15 +214,6 @@ type IoTDbAccess struct {
 	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
 }
 
-// No header returned
-func (iotAccess *IoTDbAccess) Format_Timeseries() {
-	iotAccess.QueryResults = make([]string, len(iotAccess.TimeseriesList))
-	for ndx := 0; ndx < len(iotAccess.TimeseriesList); ndx++ {
-		iotAccess.QueryResults[ndx] = strings.Replace(iotAccess.TimeseriesList[ndx].Timeseries, EtsidataRoot+".", "", 1)
-	}
-	fmt.Println(len(iotAccess.QueryResults)) //<<<
-}
-
 func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string {
 	const tab = "\t"
 	output := make([]string, 0)
@@ -253,9 +244,56 @@ func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string 
 	return output
 }
 
+// SELECT COUNT(*) FROM root.etsidata.synthetic.IoT_Motion_Light;
+func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) {
+	const cwidth0 = 100
+	const cwidth1 = 9
+
+	if err := clients.session.Open(false, 0); err != nil {
+		checkErr("GetTimeseriesCount: ", err)
+	}
+	defer clients.session.Close()
+
+	var timeout int64 = 1000
+	iotAccess.Sql = "SELECT COUNT(*) FROM " + EtsidataRoot + "." + datasetName + "." + groupName + ";"
+	fmt.Println(iotAccess.Sql)
+	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
+	nameList := make([]string, 0)
+	countList := make([]string, 0)
+	maxLen := 0
+	if err == nil {
+		lines := iotAccess.PrintDataSet(sessionDataSet)
+		for ndx := range lines {
+			if strings.Contains(lines[ndx], "COUNT(") {
+				name := strings.TrimSpace(strings.Replace(lines[ndx], "COUNT("+EtsidataRoot+".", "", 1))
+				name = strings.Replace(name, ")", "", 1)
+				nameList = append(nameList, name)
+				if len(name) > maxLen {
+					maxLen = len(name)
+				}
+			} else {
+				count := strings.TrimSpace(lines[ndx])
+				if len(count) > 0 {
+					countList = append(countList, count)
+				}
+			}
+		}
+		sessionDataSet.Close()
+		iotAccess.QueryResults = make([]string, len(nameList))
+		for ndx := 0; ndx < len(nameList); ndx++ {
+			str := strings.Repeat(" ", maxLen+1-len(nameList[ndx])) + nameList[ndx] + strings.Repeat(" ", cwidth1-len(countList[ndx])) + countList[ndx]
+			iotAccess.QueryResults[ndx] = str
+		}
+		fmt.Print(len(iotAccess.QueryResults))
+		fmt.Println(" rows sent to the client.")
+	} else {
+		checkErr("GetTimeseriesCount("+datasetName+")", err)
+	}
+}
+
 // Assign iotAccess.[]IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName string) {
+func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames []string) {
 	if err := clients.session.Open(false, 0); err != nil {
 		checkErr("GetTimeseriesList: ", err)
 	}
@@ -304,12 +342,19 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName
 			}
 			sessionDataSet.Close()
 		} else {
-			checkErr("iotAccess.GetTimeseriesList("+datasetName+")", err)
+			checkErr("GetTimeseriesList("+datasetName+")", err)
 		}
 	} // for groupIndex
+	iotAccess.QueryResults = make([]string, len(iotAccess.TimeseriesList))
+	for ndx := 0; ndx < len(iotAccess.TimeseriesList); ndx++ {
+		iotAccess.QueryResults[ndx] = strings.Replace(iotAccess.TimeseriesList[ndx].Timeseries, EtsidataRoot+".", "", 1)
+	}
+	fmt.Print(len(iotAccess.QueryResults))
+	fmt.Println(" rows sent to the client.")
 }
 
 // map to databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
+// iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
 func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
 	tokens := strings.Split(clientCommand, " ")
 	baseCommand := strings.ToLower(tokens[0])
@@ -320,22 +365,26 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
 		iotAccess.QueryResults = []string{iotAccess.UserName + "successfully logged in at " + time.Now().Format(timeFormat)}
 
 	case "groups":
-		iotAccess.GetTimeseriesList([]string{""}, "*")
-		iotAccess.Format_Timeseries()
+		datasetName := "*"
+		groupNames := []string{""}
+		iotAccess.GetTimeseriesList(datasetName, groupNames)
 
-	case "group.device":
-		tokens2 := strings.Split(tokens[1], ".")
-		groupName := tokens2[0]
-		datasetName := tokens2[1]
-		iotAccess.GetTimeseriesList([]string{groupName}, datasetName)
-		iotAccess.Format_Timeseries()
+	case "group.device": // show timeseries root.etsidata.synthetic.**;
+		datasetName := tokens[1] + "."
+		groupNames := []string{"*"}
+		iotAccess.GetTimeseriesList(datasetName, groupNames)
 
 	case "timeseries": // <group.device>
 		tokens2 := strings.Split(tokens[1], ".")
-		groupName := tokens2[0]
 		datasetName := tokens2[1]
-		iotAccess.GetTimeseriesList([]string{groupName}, datasetName)
-		iotAccess.Format_Timeseries()
+		groupNames := []string{""}
+		iotAccess.GetTimeseriesList(datasetName, groupNames)
+
+	case "count": // <group.device>
+		tokens2 := strings.Split(tokens[1], ".")
+		datasetName := tokens2[0]
+		groupName := tokens2[1]
+		iotAccess.GetTimeseriesCount(datasetName, groupName) // no formatting needed
 
 	case "data": //<<<< <group.device> interval <1s> format <csv>"
 
@@ -344,7 +393,7 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
 		iotAccess.QueryResults = []string{"thank you ... logging out at " + time.Now().Format(timeFormat)}
 
 	default:
-		iotAccess.QueryResults = []string{"invalid command"}
+		iotAccess.QueryResults = []string{"invalid command: " + baseCommand + ">"}
 	}
 }
 

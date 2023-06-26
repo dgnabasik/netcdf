@@ -1221,7 +1221,7 @@ func GetBaselineOntology(identifier, title, description, startDate, endDate stri
 		` dcat:endDate   "` + endDate + `"^^xsd:date ;` + crlf +
 		`];` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `core/v3.1.1/> ;` + crlf + // include every referenced extension!
-		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
+		//`dcterms:conformsTo <` + SarefEtsiOrg + `saref4ehaw/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4envi/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + `saref4auto/v1.1.2/> ;` + crlf +
 		`dcterms:conformsTo <` + SarefEtsiOrg + SarefExtension + CurrentVersion + `> .` + // period at end of block
@@ -2710,18 +2710,23 @@ func (iot *IoTDbCsvDataFile) GetSummaryStatValues(columnName string) ([]string, 
 		return []string{}, false
 	}
 	stats := make([]string, len(iot.Measurements))
+
 	for ndx := 0; ndx < len(iot.Measurements); ndx++ {
-		_, aliasName := StandardName(iot.Summary[ndx+1][0])
-		item, _ := iot.GetMeasurementItemFromName(aliasName)
-		stats[ndx] = strings.TrimSpace(iot.Summary[ndx+1][columnIndex])
-		if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") || strings.HasPrefix(strings.ToLower(item.MeasurementType), "long") {
-			index := strings.Index(stats[ndx], ".")
-			if index >= 0 {
-				stats[ndx] = stats[ndx][0:index]
+		for _, item := range iot.Measurements {
+			if item.ColumnOrder == ndx && !item.Ignore && ndx < len(iot.Measurements)-1 {
+				_, aliasName := StandardName(iot.Summary[ndx+1][0])
+				item, _ := iot.GetMeasurementItemFromName(aliasName)
+				stats[ndx] = strings.TrimSpace(iot.Summary[ndx+1][columnIndex])
+				if strings.HasPrefix(strings.ToLower(item.MeasurementType), "int") || strings.HasPrefix(strings.ToLower(item.MeasurementType), "long") {
+					index := strings.Index(stats[ndx], ".")
+					if index >= 0 {
+						stats[ndx] = stats[ndx][0:index]
+					}
+				}
+				if len(stats[ndx]) == 0 {
+					stats[ndx] = strings.TrimSpace(iot.Summary[ndx+1][1]) // this type is nearly always Unicode
+				}
 			}
-		}
-		if len(stats[ndx]) == 0 {
-			stats[ndx] = strings.TrimSpace(iot.Summary[ndx+1][1]) // this type is nearly always Unicode
 		}
 	}
 	return stats, true
