@@ -15,6 +15,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,11 +25,11 @@ import (
 )
 
 const (
-	timeFormat    = "2006-01-02 15:04:05" // RFC3339 format.
+	TimeFormat    = "2006-01-02T15:04:05Z" // RFC3339 format.
 	EtsidataRoot  = "root.etsidata"
 	WSHOST        = "localhost" // if not specified, the function listens on all available unicast and anycast IP addresses of the local system.
-	SERVER_TYPE   = "tcp4"      // tcp, tcp4, tcp6, unix, or unix packet
-	jsonExtension = ".json"
+	JsonExtension = "json"
+	CsvExtension  = "csv"
 	crlf          = "\n"
 )
 
@@ -35,9 +37,12 @@ var WSPORT string = ":9898" // override in main()
 var addr = flag.String("addr", WSHOST+WSPORT, "http service address")
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
+var timeout int64 = 1000
 
 // for both IotDB & GraphDB.
-var databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "count <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
+var DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "count <group.device>", "data <group.device> interval <1s> format <csv>", "logout", "stop"}
+var OutputFormats = []string{CsvExtension, JsonExtension}
+var ParameterList = []string{"interval", "format", "limit", "startdate", "enddate", "loop"}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -78,6 +83,16 @@ func testRemoteAddressPortsOpen(host string, ports []string) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// Non-generic version looks for first embedded string match. Return empty string if not found.
+func find(lines []string, target string) (string, int) {
+	for ndx, v := range lines {
+		if strings.Contains(v, target) {
+			return lines[ndx], ndx
+		}
+	}
+	return "", -1
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -164,7 +179,7 @@ func GetTimeseriesMetadata(filePath string) (TimeseriesMetadata, bool) {
 
 func GetMetadataFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
-	return filepath.Dir(dataFilePath) + "/metadata_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + jsonExtension
+	return filepath.Dir(dataFilePath) + "/metadata_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + "." + JsonExtension
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -212,6 +227,12 @@ type IoTDbAccess struct {
 	UserName           string                   `json:"username"`
 	TimeseriesList     []IotdbTimeseriesProfile `json:"timeserieslist"`
 	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
+	Interval           float64                  `json:"interval"`   // seconds
+	OutputFormat       string                   `json:"outputformat"`
+	RowLimit           int                      `json:"rowlimit"`
+	StartDate          time.Time                `json:"startdate"`
+	EndDate            time.Time                `json:"enddate"`
+	LoopOutput         int                      `json:"loopoutput"`
 }
 
 func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string {
@@ -244,9 +265,126 @@ func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string 
 	return output
 }
 
+// data synthetic.IoT_Motion_Light interval 0.5 format csv
+func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, parameters []string) {
+	if err := clients.session.Open(false, 0); err != nil {
+		checkErr("GetTimeseriesData: ", err)
+	}
+	defer clients.session.Close()
+
+	// process parameters
+	for ndx := 0; ndx < len(parameters); ndx += 2 {
+		pm, index := find(ParameterList, strings.ToLower(parameters[ndx]))
+
+		if pm == "interval" && index >= 0 {
+			interval, err := strconv.ParseFloat(parameters[ndx+1], 64)
+			if err != nil || interval < 0 || interval > 3600 {
+				fmt.Println("Could not parse interval " + parameters[ndx+1])
+				iotAccess.Interval = 0
+			} else {
+				iotAccess.Interval = interval
+			}
+		}
+
+		if pm == "format" && index >= 0 && len(parameters) >= ndx {
+			str, ndx2 := find(OutputFormats, strings.ToLower(parameters[ndx+1]))
+			if ndx2 >= 0 {
+				iotAccess.OutputFormat = str
+			} else {
+				fmt.Println("Could not parse format " + parameters[ndx+1])
+				iotAccess.OutputFormat = OutputFormats[0]
+			}
+		}
+
+		if pm == "limit" && index >= 0 && len(parameters) >= ndx {
+			limit, err := strconv.Atoi(parameters[ndx+1])
+			if err != nil || limit < 0 || limit > 1000000 {
+				fmt.Println("Could not parse limit " + parameters[ndx+1])
+				iotAccess.RowLimit = limit
+			} else {
+				iotAccess.RowLimit = 0
+			}
+		}
+
+		if pm == "loop" && index >= 0 && len(parameters) >= ndx {
+			loop, err := strconv.Atoi(parameters[ndx+1])
+			if err != nil || loop < 0 || loop > 1000000 {
+				fmt.Println("Could not parse loop " + parameters[ndx+1])
+				iotAccess.LoopOutput = loop
+			} else {
+				iotAccess.LoopOutput = 0
+			}
+		}
+
+		if pm == "startdate" && index >= 0 && len(parameters) >= ndx {
+			startdate, err := time.Parse(TimeFormat, parameters[ndx+1])
+			if err != nil {
+				fmt.Println("Could not parse startdate " + parameters[ndx+1])
+				iotAccess.StartDate = startdate
+			} else {
+				iotAccess.StartDate = time.Time{}
+			}
+		}
+
+		if pm == "enddate" && index >= 0 && len(parameters) >= ndx {
+			enddate, err := time.Parse(TimeFormat, parameters[ndx+1])
+			if err != nil {
+				fmt.Println("Could not parse enddate " + parameters[ndx+1])
+				iotAccess.EndDate = enddate
+			} else {
+				iotAccess.EndDate = time.Time{}
+			}
+		}
+	}
+
+	iotAccess.Sql = "SELECT * FROM " + EtsidataRoot + "." + datasetName + "." + groupName + " ORDER BY time ASC LIMIT 101;" //<<<
+	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
+	// 'Time' + each measurement name (unordered) + DatasetName + 2 blank lines + each measurement value + 2 blank lines
+	if err == nil {
+		fmt.Println(iotAccess.Sql)
+		lines := iotAccess.PrintDataSet(sessionDataSet)
+		sessionDataSet.Close()
+		// collect headers. Time column always has value 0.
+		headers := make(map[string]int)
+		ndx := 0
+		processing := true
+		var sb strings.Builder
+		for processing {
+			measurementName := strings.Replace(strings.TrimSpace(lines[ndx]), EtsidataRoot+"."+datasetName+"."+groupName+".", "", 1)
+			headers[measurementName] = ndx
+			sb.WriteString(measurementName + ",") // csv
+			processing = len(strings.TrimSpace(lines[ndx+1])) > 0
+			ndx++
+		}
+		iotAccess.QueryResults = make([]string, 0)
+		iotAccess.QueryResults = append(iotAccess.QueryResults, sb.String()[0:len(sb.String())-1]) // remove trailing ','
+		// process unknown number of data elements; 1 per line
+		ndx++
+		processing = true
+		nResults := 1
+		for processing {
+			sb.Reset()
+			for processing {
+				sb.WriteString(strings.TrimSpace(lines[ndx]) + ",") // csv
+				processing = len(lines) > ndx+1
+				if processing {
+					processing = len(strings.TrimSpace(lines[ndx])) > 0
+				}
+				ndx++
+			}
+			iotAccess.QueryResults = append(iotAccess.QueryResults, sb.String()[0:len(sb.String())-2]) // remove trailing ',,'
+			nResults++
+			processing = len(lines) >= ndx+1
+		}
+		fmt.Print(len(iotAccess.QueryResults))
+		fmt.Println(" rows will be sent to the client.")
+	} else {
+		checkErr("GetTimeseriesData("+datasetName+")", err)
+	}
+}
+
 // SELECT COUNT(*) FROM root.etsidata.synthetic.IoT_Motion_Light;
 func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) {
-	const cwidth0 = 100
 	const cwidth1 = 9
 
 	if err := clients.session.Open(false, 0); err != nil {
@@ -254,15 +392,15 @@ func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) 
 	}
 	defer clients.session.Close()
 
-	var timeout int64 = 1000
 	iotAccess.Sql = "SELECT COUNT(*) FROM " + EtsidataRoot + "." + datasetName + "." + groupName + ";"
-	fmt.Println(iotAccess.Sql)
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 	nameList := make([]string, 0)
 	countList := make([]string, 0)
 	maxLen := 0
 	if err == nil {
+		fmt.Println(iotAccess.Sql)
 		lines := iotAccess.PrintDataSet(sessionDataSet)
+		sessionDataSet.Close()
 		for ndx := range lines {
 			if strings.Contains(lines[ndx], "COUNT(") {
 				name := strings.TrimSpace(strings.Replace(lines[ndx], "COUNT("+EtsidataRoot+".", "", 1))
@@ -278,7 +416,6 @@ func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) 
 				}
 			}
 		}
-		sessionDataSet.Close()
 		iotAccess.QueryResults = make([]string, len(nameList))
 		for ndx := 0; ndx < len(nameList); ndx++ {
 			str := strings.Repeat(" ", maxLen+1-len(nameList[ndx])) + nameList[ndx] + strings.Repeat(" ", cwidth1-len(countList[ndx])) + countList[ndx]
@@ -299,16 +436,16 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 	}
 	defer clients.session.Close()
 
-	var timeout int64 = 1000
 	const blockSize = 11
 	iotAccess.TimeseriesList = make([]IotdbTimeseriesProfile, 0) // want multiples of this number
 	timeseriesItem := IotdbTimeseriesProfile{}
 	for groupIndex := 0; groupIndex < len(groupNames); groupIndex++ {
 		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
-		fmt.Println(iotAccess.Sql)
 		sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 		if err == nil {
+			fmt.Println(iotAccess.Sql)
 			lines := iotAccess.PrintDataSet(sessionDataSet)
+			sessionDataSet.Close()
 			for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
 				if ndx > (blockSize - 1) {
 					index := ndx % blockSize
@@ -340,7 +477,6 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 					}
 				}
 			}
-			sessionDataSet.Close()
 		} else {
 			checkErr("GetTimeseriesList("+datasetName+")", err)
 		}
@@ -353,16 +489,24 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 	fmt.Println(" rows sent to the client.")
 }
 
-// map to databaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout"}
+func prettifyInput(clientCommand string) string {
+	space := regexp.MustCompile(`\s+`)
+	cc := space.ReplaceAllString(strings.TrimSpace(clientCommand), " ")
+	return cc
+}
+
+// map to DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout", "stop"}
 // iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
 func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
-	tokens := strings.Split(clientCommand, " ")
+	cc := prettifyInput(clientCommand)
+	tokens := strings.Split(cc, " ")
 	baseCommand := strings.ToLower(tokens[0])
+	iotAccess.ActiveSession = true
+
 	switch baseCommand {
 	case "login":
-		iotAccess.ActiveSession = true
 		iotAccess.UserName = tokens[1]
-		iotAccess.QueryResults = []string{iotAccess.UserName + "successfully logged in at " + time.Now().Format(timeFormat)}
+		iotAccess.QueryResults = []string{iotAccess.UserName + " successfully logged in at " + time.Now().Format(TimeFormat)}
 
 	case "groups":
 		datasetName := "*"
@@ -374,26 +518,36 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
 		groupNames := []string{"*"}
 		iotAccess.GetTimeseriesList(datasetName, groupNames)
 
-	case "timeseries": // <group.device>
+	case "timeseries": // <group.device>    show timeseries root.etsidata.synthetic.IoT_Motion_Light.*;
 		tokens2 := strings.Split(tokens[1], ".")
-		datasetName := tokens2[1]
-		groupNames := []string{""}
+		datasetName := tokens2[0] + "."
+		groupNames := []string{tokens2[1] + "."}
 		iotAccess.GetTimeseriesList(datasetName, groupNames)
 
-	case "count": // <group.device>
+	case "count": // <group.device>		SELECT COUNT(*) FROM root.etsidata.synthetic.IoT_Motion_Light;
 		tokens2 := strings.Split(tokens[1], ".")
 		datasetName := tokens2[0]
 		groupName := tokens2[1]
-		iotAccess.GetTimeseriesCount(datasetName, groupName) // no formatting needed
+		iotAccess.GetTimeseriesCount(datasetName, groupName)
 
-	case "data": //<<<< <group.device> interval <1s> format <csv>"
+	case "data": // data <group.device> interval <1s> format <csv>    SELECT status, temperature FROM root.ln.wf01.wt01 WHERE temperature < 24 and time > 2017-11-1 0:13:00
+		tokens2 := strings.Split(tokens[1], ".")
+		datasetName := tokens2[0]
+		groupName := tokens2[1]
+		parameters := tokens[2:]
+		iotAccess.GetTimeseriesData(datasetName, groupName, parameters)
 
 	case "logout":
 		iotAccess.ActiveSession = false
-		iotAccess.QueryResults = []string{"thank you ... logging out at " + time.Now().Format(timeFormat)}
+		iotAccess.QueryResults = []string{"thank you ... logging out at " + time.Now().Format(TimeFormat)}
+
+	case "stop":
+		iotAccess.ActiveSession = false
+		iotAccess.QueryResults = []string{}
 
 	default:
-		iotAccess.QueryResults = []string{"invalid command: " + baseCommand + ">"}
+		iotAccess.ActiveSession = false
+		iotAccess.QueryResults = []string{"invalid command: " + baseCommand}
 	}
 }
 
@@ -411,15 +565,15 @@ func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request)
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	iotAccess.socketserver, _ = upgrader.Upgrade(w, r, nil)
 	log.Println("Client connected.") // 1=TextMessage
-	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(databaseCommands, "; ")))
+	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; ")))
 	if err != nil {
 		log.Println(err)
 	}
 	iotAccess.reader()
 }
 
-// Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage. The interpretation of binary messages is left to the application.
-// The WebSocket protocol defines three types of control messages: close, ping, pong.
+// Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage.
+// The interpretation of binary messages is left to the application.
 func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 	for {
 		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage()
@@ -427,15 +581,25 @@ func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 			log.Println(err)
 			return
 		}
-		fmt.Println("reader: " + string(clientRequest))
-		iotAccess.RoutingParser(string(clientRequest))
-		for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
-			message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
-			if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil {
-				log.Println(err)
-				return
+		request := string(clientRequest)
+		fmt.Println("reader: " + request)
+		iotAccess.RoutingParser(request)
+		// send data back to the client, one row per time interval.
+		fmt.Println("Started sending data to client at " + time.Now().Format(TimeFormat) + " with parameters " + request)
+		var duration time.Duration = time.Duration(iotAccess.Interval * 1000)
+		continuous := true
+		for continuous {
+			for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
+				message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
+				if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil {
+					log.Println(err)
+					return
+				}
+				time.Sleep(duration * time.Millisecond)
 			}
+			continuous = iotAccess.LoopOutput > 0
 		}
+		fmt.Println("Finished sending data to client at " + time.Now().Format(TimeFormat))
 	}
 }
 
@@ -443,7 +607,9 @@ func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 
 var clients IoTDbAccess
 
-//var clients = make(map[*websocket.Conn]bool)
+/* <<<var clients = make(map[*websocket.Conn]bool)
+metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
+*/
 
 func setupRoutes() {
 	iotdbConnection, ok := Init_IoTDB(true)
@@ -451,7 +617,6 @@ func setupRoutes() {
 		checkErr("Init_IoTDB: ", errors.New(iotdbConnection))
 	}
 	clients = IoTDbAccess{ActiveSession: true, session: client.NewSession(clientConfig)}
-
 	http.HandleFunc("/", homePage) // http.FileServer(http.Dir("./jsclient"))
 	http.HandleFunc("/ws", clients.wsEndpoint)
 	fmt.Println("Routes established.")
@@ -466,10 +631,6 @@ func main() {
 	setupRoutes()
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
-
-/*
-metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
-*/
 
 var homeTemplate = template.Must(template.New("").Parse(`
 <!DOCTYPE html>
