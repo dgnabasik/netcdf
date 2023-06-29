@@ -230,11 +230,12 @@ type IoTDbAccess struct {
 	Interval           float64                  `json:"interval"`   // seconds
 	OutputFormat       string                   `json:"outputformat"`
 	RowLimit           int                      `json:"rowlimit"`
-	StartDate          time.Time                `json:"startdate"`
-	EndDate            time.Time                `json:"enddate"`
+	StartDate          int64                    `json:"startdate"`
+	EndDate            int64                    `json:"enddate"`
 	LoopOutput         int                      `json:"loopoutput"`
 }
 
+// <<< Does not print milliseconds.
 func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string {
 	const tab = "\t"
 	output := make([]string, 0)
@@ -266,16 +267,20 @@ func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string 
 }
 
 // data synthetic.IoT_Motion_Light interval 0.5 format csv
+// data synthetic.IoT_Thermostat interval 0.5 format csv LIMIT 100
+// Only GetTimeseriesData() appends <end of data> message.
 func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, parameters []string) {
 	if err := clients.session.Open(false, 0); err != nil {
 		checkErr("GetTimeseriesData: ", err)
 	}
 	defer clients.session.Close()
 
-	// process parameters
-	for ndx := 0; ndx < len(parameters); ndx += 2 {
-		pm, index := find(ParameterList, strings.ToLower(parameters[ndx]))
+	// process parameters and construct SQL. ORDER BY Time does not work if client requests random sample
+	iotAccess.Sql = "SELECT * FROM " + EtsidataRoot + "." + datasetName + "." + groupName + " ORDER BY Time ASC "
 
+	for ndx := 0; ndx < len(parameters); ndx += 2 { // do NOT change the order of these if statements!
+		pm, index := find(ParameterList, strings.ToLower(parameters[ndx]))
+		// these options do not modify iotAccess.Sql:
 		if pm == "interval" && index >= 0 {
 			interval, err := strconv.ParseFloat(parameters[ndx+1], 64)
 			if err != nil || interval < 0 || interval > 3600 {
@@ -296,16 +301,6 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 			}
 		}
 
-		if pm == "limit" && index >= 0 && len(parameters) >= ndx {
-			limit, err := strconv.Atoi(parameters[ndx+1])
-			if err != nil || limit < 0 || limit > 1000000 {
-				fmt.Println("Could not parse limit " + parameters[ndx+1])
-				iotAccess.RowLimit = limit
-			} else {
-				iotAccess.RowLimit = 0
-			}
-		}
-
 		if pm == "loop" && index >= 0 && len(parameters) >= ndx {
 			loop, err := strconv.Atoi(parameters[ndx+1])
 			if err != nil || loop < 0 || loop > 1000000 {
@@ -316,28 +311,71 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 			}
 		}
 
-		if pm == "startdate" && index >= 0 && len(parameters) >= ndx {
-			startdate, err := time.Parse(TimeFormat, parameters[ndx+1])
-			if err != nil {
-				fmt.Println("Could not parse startdate " + parameters[ndx+1])
-				iotAccess.StartDate = startdate
-			} else {
-				iotAccess.StartDate = time.Time{}
+		// modify iotAccess.Sql with WHERE clause
+		whereClause := 0 // 0=no dates; 1=just startdate, 2=just enddate, 3=both
+		_, wc1 := find(parameters, "startdate")
+		_, wc2 := find(parameters, "enddate")
+		if wc1 >= 0 {
+			whereClause = 1
+		}
+		if wc2 >= 0 {
+			whereClause = 2
+		}
+		if wc1 >= 0 && wc2 >= 0 {
+			whereClause = 3
+		}
+
+		if whereClause > 0 {
+			if pm == "startdate" && index >= 0 && len(parameters) >= ndx {
+				startdate, err := time.Parse(TimeFormat, parameters[ndx+1])
+				if err == nil {
+					iotAccess.StartDate = startdate.UTC().Unix()
+				} else {
+					fmt.Println("Could not parse startdate " + parameters[ndx+1])
+					iotAccess.StartDate = 0
+				}
+			}
+
+			if pm == "enddate" && index >= 0 && len(parameters) >= ndx {
+				enddate, err := time.Parse(TimeFormat, parameters[ndx+1])
+				if err == nil {
+					iotAccess.EndDate = enddate.UTC().Unix()
+				} else {
+					fmt.Println("Could not parse enddate " + parameters[ndx+1])
+					iotAccess.EndDate = 0
+				}
+			}
+
+			switch whereClause {
+			case 1:
+				if iotAccess.StartDate > 0 {
+					iotAccess.Sql += "WHERE Time >= " + strconv.FormatInt(iotAccess.StartDate, 10) + " "
+				}
+			case 2:
+				if iotAccess.EndDate > 0 {
+					iotAccess.Sql += "WHERE Time <= " + strconv.FormatInt(iotAccess.EndDate, 10) + " "
+				}
+			case 3:
+				if iotAccess.StartDate > 0 && iotAccess.EndDate > 0 {
+					iotAccess.Sql += "WHERE Time >= " + strconv.FormatInt(iotAccess.StartDate, 10) + " AND Time <= " + strconv.FormatInt(iotAccess.EndDate, 10) + " "
+				}
 			}
 		}
 
-		if pm == "enddate" && index >= 0 && len(parameters) >= ndx {
-			enddate, err := time.Parse(TimeFormat, parameters[ndx+1])
-			if err != nil {
-				fmt.Println("Could not parse enddate " + parameters[ndx+1])
-				iotAccess.EndDate = enddate
+		// LIMIT has to be the last parameter.
+		if pm == "limit" && index >= 0 && len(parameters) >= ndx {
+			limit, err := strconv.Atoi(parameters[ndx+1])
+			if err != nil || limit < 0 || limit > 1000000 {
+				fmt.Println("Could not parse limit " + parameters[ndx+1])
+				iotAccess.RowLimit = 0
 			} else {
-				iotAccess.EndDate = time.Time{}
+				iotAccess.RowLimit = limit
+				iotAccess.Sql += " LIMIT " + parameters[ndx+1] + " "
 			}
 		}
 	}
+	iotAccess.Sql += ";"
 
-	iotAccess.Sql = "SELECT * FROM " + EtsidataRoot + "." + datasetName + "." + groupName + " ORDER BY time ASC LIMIT 101;" //<<<
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 	// 'Time' + each measurement name (unordered) + DatasetName + 2 blank lines + each measurement value + 2 blank lines
 	if err == nil {
@@ -360,7 +398,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 		iotAccess.QueryResults = append(iotAccess.QueryResults, sb.String()[0:len(sb.String())-1]) // remove trailing ','
 		// process unknown number of data elements; 1 per line
 		ndx++
-		processing = true
+		processing = len(lines) > 0
 		nResults := 1
 		for processing {
 			sb.Reset()
@@ -376,6 +414,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 			nResults++
 			processing = len(lines) >= ndx+1
 		}
+		iotAccess.QueryResults = append(iotAccess.QueryResults, "<end of data>")
 		fmt.Print(len(iotAccess.QueryResults))
 		fmt.Println(" rows will be sent to the client.")
 	} else {
@@ -497,7 +536,7 @@ func prettifyInput(clientCommand string) string {
 
 // map to DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout", "stop"}
 // iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
-func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
+func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 	cc := prettifyInput(clientCommand)
 	tokens := strings.Split(cc, " ")
 	baseCommand := strings.ToLower(tokens[0])
@@ -538,17 +577,16 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) {
 		iotAccess.GetTimeseriesData(datasetName, groupName, parameters)
 
 	case "logout":
-		iotAccess.ActiveSession = false
+		//iotAccess.ActiveSession = false
 		iotAccess.QueryResults = []string{"thank you ... logging out at " + time.Now().Format(TimeFormat)}
 
-	case "stop":
+	case "stop": // send interrupt
 		iotAccess.ActiveSession = false
 		iotAccess.QueryResults = []string{}
 
-	default:
-		iotAccess.ActiveSession = false
-		iotAccess.QueryResults = []string{"invalid command: " + baseCommand}
+	default: // do nothing
 	}
+	return iotAccess.ActiveSession
 }
 
 // Check if incoming request from a different domain is allowed to connect; get CORS.
@@ -583,11 +621,11 @@ func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 		}
 		request := string(clientRequest)
 		fmt.Println("reader: " + request)
-		iotAccess.RoutingParser(request)
+		keepPushingData := iotAccess.RoutingParser(request)
 		// send data back to the client, one row per time interval.
 		fmt.Println("Started sending data to client at " + time.Now().Format(TimeFormat) + " with parameters " + request)
 		var duration time.Duration = time.Duration(iotAccess.Interval * 1000)
-		continuous := true
+		continuous := keepPushingData
 		for continuous {
 			for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
 				message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
@@ -608,6 +646,7 @@ func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 var clients IoTDbAccess
 
 /* <<<var clients = make(map[*websocket.Conn]bool)
+https://medium.com/swlh/handle-concurrency-in-gorilla-web-sockets-ade4d06acd9c
 metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
 */
 

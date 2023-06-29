@@ -76,6 +76,7 @@ var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "in
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
+var timeout int64 = 1000
 
 /*
 Discrete uniform distribution: All outcomes are equally likely.
@@ -130,7 +131,6 @@ type IoTDbAccess struct {
 // Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
 func (iotAccess *IoTDbAccess) GetTimeseriesList(groupNames []string, datasetName string) []IotdbTimeseriesProfile {
-	var timeout int64 = 1000
 	const blockSize = 11
 	timeseriesList := make([]IotdbTimeseriesProfile, 0) // want multiples of this number
 	timeseriesItem := IotdbTimeseriesProfile{}
