@@ -18,7 +18,6 @@ import (
 const (
 	SERVER_HOST = "localhost"
 	SERVER_PORT = ":9898" // literal port number or service name.
-	SERVER_TYPE = "tcp"
 )
 
 var addr = flag.String("addr", SERVER_HOST+SERVER_PORT, "http service address")
@@ -36,10 +35,10 @@ func printCommands() {
 	formatCommand(" group.device <group>", "list available time series devices for a specific group. Example: group.device synthetic", dist1)
 	formatCommand(" timeseries <group.device>", "list the measurement names for a specifc group & device. Example: timeseries synthetic.IoT_Weather", dist1)
 	formatCommand(" count <group.device>", "count the number of measurement values for a specifc group & device. Example: count synthetic.IoT_Weather", dist1)
-	formatCommand(" data <group.device> interval 1s format csv", "stream the data for a specifc group & device at 1 second intervals in CSV format. Example: data synthetic.IoT_Weather interval 1s format csv", dist1)
-	formatCommand(" data <group.device> interval 5s format json", "stream the data for a specifc group & device at 5 second intervals in JSON format. Example: data synthetic.IoT_Weather interval 5s format json", dist1)
+	formatCommand(" data <group.device> interval 1 format csv", "stream the data for a specifc group & device at 1 second intervals in CSV format. Example: data synthetic.IoT_Weather interval 1 format csv", dist1)
+	formatCommand(" data <group.device> interval 5 format json", "stream the data for a specifc group & device at 5 second intervals in JSON format. Example: data synthetic.IoT_Weather interval 5 format json", dist1)
 	formatCommand(" stop", "stop sending me data", dist1)
-	formatCommand(" logout", "logging out.", dist1)
+	formatCommand(" logout", "log out of the streaming data server.", dist1)
 	fmt.Println()
 }
 

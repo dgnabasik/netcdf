@@ -60,7 +60,7 @@ const ( // these do not include trailing >
 	s4data                 = "s4data:"
 	SarefEtsiOrg           = "https://saref.etsi.org/"
 	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
-	serializationExtension = ".ttl" //trig<<< Classic Turtle does not support named graphs. Must output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
+	serializationExtension = ".ttl" //.trig Classic Turtle does not support named graphs -- output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	csvExtension           = ".csv"
 	varExtension           = ".var"
@@ -301,7 +301,6 @@ func WriteStringToFile(filePath, str string) error {
 	return err
 }
 
-// <<< Check against databaseCommands.
 func GetTimeseriesCommands(programArgs []string) []string {
 	timeseriesCommands := make([]string, 0)
 	for ndx := range programArgs {
@@ -363,7 +362,7 @@ type NetCDF struct {
 	Datastream_name     string                          `json:"datastream_name"`
 	Input_files         string                          `json:"input_files"`
 	History             string                          `json:"history"`
-	TimeMeasurementName string                          `json:"timemeasurementname"` // index into Measurements map
+	TimeMeasurementName string                          `json:"timemeasurementname"` // index into Measurements map; <<< where to assign?
 	Measurements        map[string]*MeasurementVariable `json:"measurements"`
 	HouseIndices        []string                        `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
 	LongtimeIndices     []string                        `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
@@ -553,8 +552,7 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 // Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
 // <<< Specify output={no data, summary, all data}
 func (cdf NetCDF) Format_Ontology(dataOutputChoice int) []string {
-	startDate := cdf.GetNormalizedTimestamp("min")
-	endDate := cdf.GetNormalizedTimestamp("max")
+	startDate, endDate := cdf.GetStartEndDates()
 	baseline := GetBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)
@@ -658,12 +656,52 @@ func (cdf *NetCDF) GetSummaryValue(columnName, fieldName string) string {
 	return columnValues[index]
 }
 
-// Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
-// <<<< TimeMeasurementName: {ecobee:3:units=yyyy-MM-dd hh:mm:ss}
-func (cdf *NetCDF) GetNormalizedTimestamp(summaryValue string) string {
-	fmt.Println(cdf.TimeMeasurementName)
-	//  GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
-	return GetDateStr(time.Now())
+// search for either original or alias name
+func (cdf *NetCDF) GetMeasurementItemFromName(name string) (*MeasurementVariable, bool) {
+	item, ok := cdf.Measurements[name]
+	if ok {
+		return item, true
+	}
+	for _, item := range cdf.Measurements {
+		if name == item.MeasurementName || name == item.MeasurementAlias {
+			return item, true
+		}
+	}
+	return item, false
+}
+
+func (cdf *NetCDF) GetUnitsColumnNumber() int {
+	for ndx := 0; ndx < len(cdf.Summary[0]); ndx++ { // iterate over summary header row
+		if strings.ToLower(cdf.Summary[0][ndx]) == "units" {
+			return ndx
+		}
+	}
+	return -1
+}
+
+// Reconcile various timestamp formats. Return xsd:date format (yyyy-MM-dd)
+// TimeMeasurementName: {ecobee:3:units=yyyy-MM-dd hh:mm:ss}
+func (cdf *NetCDF) GetStartEndDates() (string, string) {
+	timeRow := 2 // get from TimeMeasurementName
+	sDate := cdf.Summary[timeRow][3]
+	eDate := cdf.Summary[timeRow][4]
+	unitsColumn := cdf.GetUnitsColumnNumber()
+
+	if cdf.Summary[0][unitsColumn] == "unixutc" {
+		startTime, err := getStartTimeFromLongint(sDate)
+		if err != nil {
+			sDate = GetDateStr(startTime)
+		}
+		endTime, err := getStartTimeFromLongint(eDate)
+		if err != nil {
+			eDate = GetDateStr(endTime)
+		}
+	} else {
+		sDate = sDate[0:10]
+		eDate = eDate[0:10]
+	}
+
+	return sDate, eDate
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -672,13 +710,7 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "int64", "Double": "double"}
 	cdf.Measurements = make(map[string]*MeasurementVariable, 0)
 	// get units column
-	unitsColumn := 0
-	for ndx := 0; ndx < len(cdf.Summary[0]); ndx++ { // iterate over summary header row
-		if strings.ToLower(cdf.Summary[0][ndx]) == "units" {
-			unitsColumn = ndx
-			break
-		}
-	}
+	unitsColumn := cdf.GetUnitsColumnNumber()
 	ndx1 := 0
 	dimMap := cdf.getDimensionMap()
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
@@ -2643,7 +2675,7 @@ type IoTDbCsvDataFile struct {
 	DataFilePath        string                      `json:"datafilepath"`
 	DataFileType        string                      `json:"datafiletype"`
 	DatasetName         string                      `json:"datasetname"`
-	TimeMeasurementName string                      `json:"timemeasurementname"` // index into Measurements map
+	TimeMeasurementName string                      `json:"timemeasurementname"` // index into Measurements map; <<< where to assign?
 	Measurements        map[string]*MeasurementItem `json:"measurements"`
 	Summary             [][]string                  `json:"summary"` // from summary file
 	Dataset             [][]string                  `json:"dataset"` // actual data
@@ -2743,12 +2775,40 @@ func (iot *IoTDbCsvDataFile) GetSummaryValue(columnName, fieldName string) strin
 	return columnValues[index]
 }
 
-// Reconcile various timestamp formats. summaryValue={min:2, max:3, mean:6}  Return xsddate format (yyyy-MM-dd)
-// <<<< TimeMeasurementName: {opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	HomeC:2:units=unixutc	ton.iot:2:units=unixutc}
-func (iot *IoTDbCsvDataFile) GetNormalizedTimestamp(summaryValue string) string {
-	fmt.Println(iot.TimeMeasurementName)
-	// GetMeasurementItemFromName(name string) (*MeasurementItem, bool) {
-	return GetDateStr(time.Now())
+// iterate over Summary header row
+func (iot *IoTDbCsvDataFile) GetUnitsColumnNumber() int {
+	for ndx := 0; ndx < len(iot.Summary[0]); ndx++ {
+		if strings.ToLower(iot.Summary[0][ndx]) == "units" {
+			return ndx
+		}
+	}
+	return -1
+}
+
+// Reconcile various timestamp formats. Return xsd:date format (yyyy-MM-dd)  D2 & E2
+// TimeMeasurementName: {opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	HomeC:2:units=unixutc	ton.iot:2:units=unixutc}
+func (iot *IoTDbCsvDataFile) GetStartEndDates() (string, string) {
+	timeRow := 1 // get from TimeMeasurementName
+	sDate := iot.Summary[timeRow][3]
+	eDate := iot.Summary[timeRow][4]
+	unitsColumn := iot.GetUnitsColumnNumber()
+
+	if iot.Summary[0][unitsColumn] == "unixutc" {
+		startTime, err := getStartTimeFromLongint(sDate)
+		if err != nil {
+			sDate = GetDateStr(startTime)
+		}
+		endTime, err := getStartTimeFromLongint(eDate)
+		if err != nil {
+			eDate = GetDateStr(endTime)
+		}
+	} else {
+		sDate = sDate[0:10]
+		eDate = eDate[0:10]
+	}
+	fmt.Println(sDate)
+	fmt.Println(eDate) //<<<<
+	return sDate, eDate
 }
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
@@ -2757,13 +2817,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "longint", "Double": "double"}
 	iot.Measurements = make(map[string]*MeasurementItem, 0)
 	// get units column
-	unitsColumn := 0
-	for ndx := 0; ndx < len(iot.Summary[0]); ndx++ { // iterate over summary header row
-		if strings.ToLower(iot.Summary[0][ndx]) == "units" {
-			unitsColumn = ndx
-			break
-		}
-	}
+	unitsColumn := iot.GetUnitsColumnNumber()
 	ndx1 := 0
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
 		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || len(iot.Summary[ndx+1][0]) < 2
@@ -2836,8 +2890,7 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 // Make the dataset its own Class and loadable into GraphDB. Special handling: "dateTime", "XMLLiteral", "anyURI"
 // <<< Specify output={no data, summary, all data}  Expect timestamp as first measurement row.
 func (iot *IoTDbCsvDataFile) Format_Ontology(dataOutputChoice int) []string {
-	startDate := iot.GetNormalizedTimestamp("min")
-	endDate := iot.GetNormalizedTimestamp("max")
+	startDate, endDate := iot.GetStartEndDates()
 	baseline := GetBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
 	output = append(output, `### specific time series DatatypeProperties`)

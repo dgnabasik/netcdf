@@ -79,7 +79,7 @@ func receivePong(pongNum int, pongChan <-chan Pong, doneChan chan<- []Pong) {
 }
 
 func main() {
-	hosts, _ := Hosts("192.168.1.47/24")
+	hosts, _ := Hosts("10.103.1.77/24") // "193.49.172.183/24"  10.103.4.83/24   10.103.1.77/24
 	concurrentMax := 100
 	pingChan := make(chan string, concurrentMax)
 	pongChan := make(chan Pong, len(hosts))

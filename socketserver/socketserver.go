@@ -1,7 +1,7 @@
 // Create a separate Goroutine to serve each TCP client.  Execute netcat to test: nc 127.0.0.1 <port>
 // lsof -Pnl +M -i4	or -i6		netstat -tulpn
 // sudo nmap localhost => 9898/tcp open  monkeycom  (because it uses gorilla/websocket - haha)
-// Each Gorilla websocket connection can have at most one reader and one writer.
+// Each Gorilla websocket connection can have at most one reader and one writer. https://medium.com/swlh/handle-concurrency-in-gorilla-web-sockets-ade4d06acd9c
 // https://mattermost.com/blog/how-to-build-an-authentication-microservice-in-golang-from-scratch/
 // git clone https://github.com/shadowshot-x/micro-product-go.git
 // curl http://localhost:9090/auth/signin --header 'Email:abc@gmail.com' --header 'Passwordhash:hashedme1'
@@ -230,6 +230,13 @@ func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfil
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
+var clients IoTDbAccess
+
+/* <<<<
+var clients = make(map[*websocket.Conn]bool)
+metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
+*/
+
 type IoTDbAccess struct {
 	session            client.Session
 	Sql                string          `json:"sql"`
@@ -237,7 +244,7 @@ type IoTDbAccess struct {
 	TimeseriesCommands []string        `json:"timeseriescommands"` // given as command-line parameters
 	QueryResults       []string        `json:"queryresults"`       // every message the client will ever get
 	socketserver       *websocket.Conn // new fields
-	Mutex              sync.Mutex
+	mutex              sync.Mutex
 	UserName           string                   `json:"username"`
 	TimeseriesList     []IotdbTimeseriesProfile `json:"timeserieslist"`
 	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
@@ -302,7 +309,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 		if pm == "interval" && index >= 0 {
 			interval, err := strconv.ParseFloat(parameters[ndx+1], 64)
 			if err != nil || interval < 0 || interval > 3600 {
-				iotAccess.PrintMessage("Could not parse interval " + parameters[ndx+1])
+				iotAccess.PrintMessage("Could not parse interval into seconds " + parameters[ndx+1])
 				iotAccess.Interval = 0
 			} else {
 				iotAccess.Interval = interval
@@ -559,9 +566,9 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 	iotAccess.ActiveSession = true
 
 	switch baseCommand {
-	case "login": //<<<< call microservice
+	case "login": //<<< call microservice
 		iotAccess.UserName = tokens[1]
-		iotAccess.QueryResults = []string{iotAccess.UserName + " successfully logged in at " + time.Now().Format(TimeFormat)}
+		iotAccess.QueryResults = []string{iotAccess.UserName + " logged in at " + time.Now().Format(TimeFormat)}
 
 	case "groups":
 		datasetName := "*"
@@ -611,7 +618,7 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 	// Limit the buffer sizes to the maximum expected message size.
 	var upgrader = websocket.Upgrader{ //  EnableCompression: true,
-		ReadBufferSize:  256,
+		ReadBufferSize:  1024,
 		WriteBufferSize: 4096,
 	}
 
@@ -619,25 +626,20 @@ func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request)
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	iotAccess.socketserver, _ = upgrader.Upgrade(w, r, nil)
 	log.Println("Client connected.")
-	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; "))) //<<<
+	iotAccess.mutex.Lock()
+	defer iotAccess.mutex.Unlock()
+	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; ")))
 	if err != nil {
 		log.Println(err)
 	}
 	iotAccess.reader()
 }
 
-/*
-func (p *Player) send(v interface{}) error {
-    p.mu.Lock()
-    defer p.mu.Unlock()
-    return p.Socket.WriteJSON(v)
-} */
-
 // Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage.
-// The interpretation of binary messages is left to the application.
+// The interpretation of binary messages is left to the application. Since reader() is only called from wsEndpoint(), is mutex concurrent.
 func (iotAccess *IoTDbAccess) reader() {
 	for {
-		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage() //<<<
+		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage()
 		if err != nil {
 			log.Println(err)
 			return
@@ -651,7 +653,7 @@ func (iotAccess *IoTDbAccess) reader() {
 		for continuous {
 			for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
 				message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
-				if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil { //<<<
+				if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil {
 					log.Println(err)
 					return
 				}
@@ -664,13 +666,6 @@ func (iotAccess *IoTDbAccess) reader() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
-
-var clients IoTDbAccess
-
-/* <<<var clients = make(map[*websocket.Conn]bool)
-https://medium.com/swlh/handle-concurrency-in-gorilla-web-sockets-ade4d06acd9c
-metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
-*/
 
 func setupRoutes() {
 	iotdbConnection, ok := Init_IoTDB(true)

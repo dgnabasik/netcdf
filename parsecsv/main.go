@@ -1,6 +1,7 @@
 package main
 
-// Counts missing values in CSV file.
+// Counts missing values in CSV file. This produces different values from what xsv.cardinality reports.
+// Only the timestamp column is completely full.
 import (
 	"bufio"
 	"fmt"
