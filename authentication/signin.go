@@ -1,18 +1,4 @@
-// Package Authentication of Product API
-//
-// Documentation for Authentication of Product API
-//
-// Schemes : http
-// BasePath : /auth
-// Version : 1.0.0
-//
-// Consumes:
-// 	- application/json
-//
-// Produces:
-// 	- application/json
-// swagger:meta
-package authservice
+package authentication
 
 import (
 	"errors"

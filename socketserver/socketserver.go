@@ -53,7 +53,7 @@ var clientConfig *client.Config
 var timeout int64 = 1000
 
 // for both IotDB & GraphDB.
-var DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "count <group.device>", "data <group.device> interval <1s> format <csv>", "logout", "stop"}
+var DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "count <group.device>", "data <group.device> interval <1> format <csv>", "logout", "stop"}
 var OutputFormats = []string{CsvExtension, JsonExtension}
 var ParameterList = []string{"interval", "format", "limit", "startdate", "enddate", "loop"}
 
@@ -557,7 +557,7 @@ func prettifyInput(clientCommand string) string {
 	return cc
 }
 
-// map to DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>", "logout", "stop"}
+// map to DatabaseCommands = []string{"login <myName>", "groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1> format <csv>", "logout", "stop"}
 // iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
 func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 	cc := prettifyInput(clientCommand)
@@ -592,7 +592,7 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 		groupName := tokens2[1]
 		iotAccess.GetTimeseriesCount(datasetName, groupName)
 
-	case "data": // data <group.device> interval <1s> format <csv>    SELECT status, temperature FROM root.ln.wf01.wt01 WHERE temperature < 24 and time > 2017-11-1 0:13:00
+	case "data": // data <group.device> interval <1> format <csv>    SELECT status, temperature FROM root.ln.wf01.wt01 WHERE temperature < 24 and time > 2017-11-1 0:13:00
 		tokens2 := strings.Split(tokens[1], ".")
 		datasetName := tokens2[0]
 		groupName := tokens2[1]

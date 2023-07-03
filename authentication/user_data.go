@@ -1,4 +1,4 @@
-package data
+package authentication
 
 // User struct
 type user struct {

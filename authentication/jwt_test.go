@@ -1,4 +1,4 @@
-package jwt
+package authentication
 
 import (
 	"fmt"
