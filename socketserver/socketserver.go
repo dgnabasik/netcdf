@@ -551,6 +551,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 	iotAccess.PrintMessage(fmt.Sprintf("%d %s", len(iotAccess.QueryResults), " rows sent to the client."))
 }
 
+// IoTDB is case-sensitive.
 func prettifyInput(clientCommand string) string {
 	space := regexp.MustCompile(`\s+`)
 	cc := space.ReplaceAllString(strings.TrimSpace(clientCommand), " ")
