@@ -1,17 +1,16 @@
-README.md for netcdf repository:: 2023-05-08
+README.md for netcdf repository:: 2023-07-03
 
 Program goals:
-1) Provide a customizable streaming sensor data publish/subscribe server for comsumption by Python, Golang, Java, Julia clients.
+1) Provide a customizable streaming sensor data publish/subscribe server for comsumption by Python, Golang, Java clients.
 2) Automatically generate SAREF-derived OWL class per data stream source; semantically enrich SAREF data.
 3) Provide test data for digital-twin simulations. 
-4) Demonstrate the utility of Named Graphs to allow the filtering and combination of data from different data streams.
 
 Configuration:
 IotDB v1.10
-Golang v1.20.4
+Golang v1.20.5
 GraphDB v10.2.1-1
 RDF4J v3.73
-Linux 5.19.0-41-generic (Ubuntu 22.04.2 LTS)
+Ubuntu 22.04.2 LTS with Linux kernel 5.19.17-051917-generic.
 Intel NUC 10i5FNH: 1Tb disk, 32 Gb RAM.
 Java v11.0.2
 

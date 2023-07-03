@@ -1,6 +1,16 @@
 // Create a separate Goroutine to serve each TCP client.  Execute netcat to test: nc 127.0.0.1 <port>
 // lsof -Pnl +M -i4	or -i6		netstat -tulpn
 // sudo nmap localhost => 9898/tcp open  monkeycom  (because it uses gorilla/websocket - haha)
+// Each Gorilla websocket connection can have at most one reader and one writer.
+// https://mattermost.com/blog/how-to-build-an-authentication-microservice-in-golang-from-scratch/
+// git clone https://github.com/shadowshot-x/micro-product-go.git
+// curl http://localhost:9090/auth/signin --header 'Email:abc@gmail.com' --header 'Passwordhash:hashedme1'
+// https://wiki.alpinelinux.org/wiki/Docker
+// addgroup username docker
+// To start the Docker daemon at boot
+//
+//	rc-update add docker default
+//	service docker start
 package main
 
 import (
@@ -14,10 +24,13 @@ import (
 	"net"
 	"net/http"
 	"os"
+
+	//"os/user"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/apache/iotdb-client-go/client"
@@ -219,11 +232,12 @@ func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfil
 
 type IoTDbAccess struct {
 	session            client.Session
-	Sql                string                   `json:"sql"`
-	ActiveSession      bool                     `json:"activesession"`
-	TimeseriesCommands []string                 `json:"timeseriescommands"` // given as command-line parameters
-	QueryResults       []string                 `json:"queryresults"`       // every message the client will ever get
-	socketserver       *websocket.Conn          // new fields
+	Sql                string          `json:"sql"`
+	ActiveSession      bool            `json:"activesession"`
+	TimeseriesCommands []string        `json:"timeseriescommands"` // given as command-line parameters
+	QueryResults       []string        `json:"queryresults"`       // every message the client will ever get
+	socketserver       *websocket.Conn // new fields
+	Mutex              sync.Mutex
 	UserName           string                   `json:"username"`
 	TimeseriesList     []IotdbTimeseriesProfile `json:"timeserieslist"`
 	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
@@ -266,6 +280,10 @@ func (iotAccess *IoTDbAccess) PrintDataSet(sds *client.SessionDataSet) []string 
 	return output
 }
 
+func (iotAccess *IoTDbAccess) PrintMessage(msg string) {
+	fmt.Println(iotAccess.UserName + ": " + msg)
+}
+
 // data synthetic.IoT_Motion_Light interval 0.5 format csv
 // data synthetic.IoT_Thermostat interval 0.5 format csv LIMIT 100
 // Only GetTimeseriesData() appends <end of data> message.
@@ -284,7 +302,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 		if pm == "interval" && index >= 0 {
 			interval, err := strconv.ParseFloat(parameters[ndx+1], 64)
 			if err != nil || interval < 0 || interval > 3600 {
-				fmt.Println("Could not parse interval " + parameters[ndx+1])
+				iotAccess.PrintMessage("Could not parse interval " + parameters[ndx+1])
 				iotAccess.Interval = 0
 			} else {
 				iotAccess.Interval = interval
@@ -296,7 +314,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 			if ndx2 >= 0 {
 				iotAccess.OutputFormat = str
 			} else {
-				fmt.Println("Could not parse format " + parameters[ndx+1])
+				iotAccess.PrintMessage("Could not parse format " + parameters[ndx+1])
 				iotAccess.OutputFormat = OutputFormats[0]
 			}
 		}
@@ -304,7 +322,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 		if pm == "loop" && index >= 0 && len(parameters) >= ndx {
 			loop, err := strconv.Atoi(parameters[ndx+1])
 			if err != nil || loop < 0 || loop > 1000000 {
-				fmt.Println("Could not parse loop " + parameters[ndx+1])
+				iotAccess.PrintMessage("Could not parse loop " + parameters[ndx+1])
 				iotAccess.LoopOutput = loop
 			} else {
 				iotAccess.LoopOutput = 0
@@ -331,7 +349,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 				if err == nil {
 					iotAccess.StartDate = startdate.UTC().Unix()
 				} else {
-					fmt.Println("Could not parse startdate " + parameters[ndx+1])
+					iotAccess.PrintMessage("Could not parse startdate " + parameters[ndx+1])
 					iotAccess.StartDate = 0
 				}
 			}
@@ -341,7 +359,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 				if err == nil {
 					iotAccess.EndDate = enddate.UTC().Unix()
 				} else {
-					fmt.Println("Could not parse enddate " + parameters[ndx+1])
+					iotAccess.PrintMessage("Could not parse enddate " + parameters[ndx+1])
 					iotAccess.EndDate = 0
 				}
 			}
@@ -366,7 +384,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 		if pm == "limit" && index >= 0 && len(parameters) >= ndx {
 			limit, err := strconv.Atoi(parameters[ndx+1])
 			if err != nil || limit < 0 || limit > 1000000 {
-				fmt.Println("Could not parse limit " + parameters[ndx+1])
+				iotAccess.PrintMessage("Could not parse limit " + parameters[ndx+1])
 				iotAccess.RowLimit = 0
 			} else {
 				iotAccess.RowLimit = limit
@@ -379,7 +397,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 	// 'Time' + each measurement name (unordered) + DatasetName + 2 blank lines + each measurement value + 2 blank lines
 	if err == nil {
-		fmt.Println(iotAccess.Sql)
+		iotAccess.PrintMessage(iotAccess.Sql)
 		lines := iotAccess.PrintDataSet(sessionDataSet)
 		sessionDataSet.Close()
 		// collect headers. Time column always has value 0.
@@ -415,8 +433,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 			processing = len(lines) >= ndx+1
 		}
 		iotAccess.QueryResults = append(iotAccess.QueryResults, "<end of data>")
-		fmt.Print(len(iotAccess.QueryResults))
-		fmt.Println(" rows will be sent to the client.")
+		iotAccess.PrintMessage(fmt.Sprintf("%d %s", len(iotAccess.QueryResults), " rows will be sent to the client."))
 	} else {
 		checkErr("GetTimeseriesData("+datasetName+")", err)
 	}
@@ -437,7 +454,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) 
 	countList := make([]string, 0)
 	maxLen := 0
 	if err == nil {
-		fmt.Println(iotAccess.Sql)
+		iotAccess.PrintMessage(iotAccess.Sql)
 		lines := iotAccess.PrintDataSet(sessionDataSet)
 		sessionDataSet.Close()
 		for ndx := range lines {
@@ -460,8 +477,8 @@ func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) 
 			str := strings.Repeat(" ", maxLen+1-len(nameList[ndx])) + nameList[ndx] + strings.Repeat(" ", cwidth1-len(countList[ndx])) + countList[ndx]
 			iotAccess.QueryResults[ndx] = str
 		}
-		fmt.Print(len(iotAccess.QueryResults))
-		fmt.Println(" rows sent to the client.")
+		iotAccess.PrintMessage(fmt.Sprintf("%d %s", len(iotAccess.QueryResults), " rows sent to the client."))
+
 	} else {
 		checkErr("GetTimeseriesCount("+datasetName+")", err)
 	}
@@ -482,7 +499,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 		iotAccess.Sql = "show timeseries " + EtsidataRoot + "." + datasetName + groupNames[groupIndex] + "*;"
 		sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
 		if err == nil {
-			fmt.Println(iotAccess.Sql)
+			iotAccess.PrintMessage(iotAccess.Sql)
 			lines := iotAccess.PrintDataSet(sessionDataSet)
 			sessionDataSet.Close()
 			for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
@@ -524,8 +541,7 @@ func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames [
 	for ndx := 0; ndx < len(iotAccess.TimeseriesList); ndx++ {
 		iotAccess.QueryResults[ndx] = strings.Replace(iotAccess.TimeseriesList[ndx].Timeseries, EtsidataRoot+".", "", 1)
 	}
-	fmt.Print(len(iotAccess.QueryResults))
-	fmt.Println(" rows sent to the client.")
+	iotAccess.PrintMessage(fmt.Sprintf("%d %s", len(iotAccess.QueryResults), " rows sent to the client."))
 }
 
 func prettifyInput(clientCommand string) string {
@@ -543,7 +559,7 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 	iotAccess.ActiveSession = true
 
 	switch baseCommand {
-	case "login":
+	case "login": //<<<< call microservice
 		iotAccess.UserName = tokens[1]
 		iotAccess.QueryResults = []string{iotAccess.UserName + " successfully logged in at " + time.Now().Format(TimeFormat)}
 
@@ -602,34 +618,40 @@ func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request)
 	// TODO: check the Origin header before calling upgrader.CheckOrigin.
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	iotAccess.socketserver, _ = upgrader.Upgrade(w, r, nil)
-	log.Println("Client connected.") // 1=TextMessage
-	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; ")))
+	log.Println("Client connected.")
+	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; "))) //<<<
 	if err != nil {
 		log.Println(err)
 	}
 	iotAccess.reader()
 }
 
+/*
+func (p *Player) send(v interface{}) error {
+    p.mu.Lock()
+    defer p.mu.Unlock()
+    return p.Socket.WriteJSON(v)
+} */
+
 // Listen indefinitely. The WebSocket protocol distinguishes between TextMessage(UTF-8) and BinaryMessage.
 // The interpretation of binary messages is left to the application.
-func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
+func (iotAccess *IoTDbAccess) reader() {
 	for {
-		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage()
+		messageType, clientRequest, err := iotAccess.socketserver.ReadMessage() //<<<
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		request := string(clientRequest)
-		fmt.Println("reader: " + request)
 		keepPushingData := iotAccess.RoutingParser(request)
 		// send data back to the client, one row per time interval.
-		fmt.Println("Started sending data to client at " + time.Now().Format(TimeFormat) + " with parameters " + request)
+		iotAccess.PrintMessage("Started sending data to client at " + time.Now().Format(TimeFormat) + " with parameters " + request)
 		var duration time.Duration = time.Duration(iotAccess.Interval * 1000)
 		continuous := keepPushingData
 		for continuous {
 			for iotAccess.QueryIndex = 0; iotAccess.QueryIndex < len(iotAccess.QueryResults); iotAccess.QueryIndex++ {
 				message := []byte(iotAccess.QueryResults[iotAccess.QueryIndex])
-				if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil {
+				if err := iotAccess.socketserver.WriteMessage(messageType, message); err != nil { //<<<
 					log.Println(err)
 					return
 				}
@@ -637,7 +659,7 @@ func (iotAccess *IoTDbAccess) reader() { // conn *websocket.Conn) {
 			}
 			continuous = iotAccess.LoopOutput > 0
 		}
-		fmt.Println("Finished sending data to client at " + time.Now().Format(TimeFormat))
+		iotAccess.PrintMessage("Finished sending data to client at " + time.Now().Format(TimeFormat))
 	}
 }
 
@@ -667,6 +689,8 @@ func main() {
 	WSPORT := ":" + os.Getenv("WSPORT")
 	fmt.Println("The socketserver program only reads from the the IoT and Graph databases.")
 	fmt.Println("Server is listening on " + WSHOST + WSPORT + " ...")
+	//currentUser, _ := user.Current()
+	//fmt.Println(currentUser.Username) // .Name .Uid
 	setupRoutes()
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
