@@ -102,7 +102,7 @@ type EntityCleanData struct {
 	Data          [][]string `json:"data"`
 }
 
-// EntityCleanData initializer.
+// EntityCleanData initializer. NOT USED
 func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 	ecd := EntityCleanData{}
 	cols := len(vars)
@@ -314,7 +314,7 @@ func GetTimeseriesCommands(programArgs []string) []string {
 
 // Format: root.etsidata.<group>.<device>	The Ecobee {id} value acts as a device.  Specific Measurement names are appended to this prefix.
 func IotDatasetPrefix(group, device string) string {
-	return EtsidataRoot + group + "." + device
+	return EtsidataRoot + "." + group + "." + device
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
@@ -762,11 +762,18 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	cdf.Measurements[LastColumnName] = &mv
 }
 
+// Change tiny values to 0.
+func (cdf *NetCDF) NormalizeValues() int {
+	count := 0
+	return count
+}
+
 // If there are no values at all in the block, IoTDB does not write the measurement, so get mismatch between number of INSERT field names and VALUES (e.g., HeatingEquipmentStage3_RunTime)
 // Ids are consecutive: data rows = 8838720; 990 distinct id values; ==> 8928 rows per id-device
 func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	fileToRead := cdf.DataFilePath + "/csv/" + cdf.DatasetName + csvExtension
 	err := cdf.ReadCsvFile(fileToRead, true) // isDataset: yes
+	cdf.NormalizeValues()
 	checkErr("cdf.ReadCsvFile ", err)
 	nBlocks := cdf.Dimensions["id"]     //=990	 len(cdf.Dataset)/(blockSize) + 1
 	blockSize := cdf.Dimensions["time"] // scope override
@@ -877,7 +884,7 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	return nil
 }
 
-// Similar to the iot version but not the same. REFACTOR
+// Similar to the iot version but not the same.
 func (cdf *NetCDF) ProcessTimeseries() error {
 	if cdf.IoTDbAccess.ActiveSession {
 		cdf.IoTDbAccess.session = client.NewSession(clientConfig)
@@ -921,10 +928,9 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 				sql = sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 				checkErr("ExecuteNonQueryStatement(createStatement)", err)
-				fmt.Println(sql)
+				fmt.Println("show timeseries " + IotDatasetPrefix(cdf.GroupName, cdf.DatasetName) + ".*;")
 			}
-			fmt.Print("Created 'id-Devices' for " + cdf.DatasetName + ": ")
-			fmt.Println(len(cdf.HouseIndices))
+			fmt.Println("Created 'id-Devices' for " + cdf.DatasetName + ": ")
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			for id := 0; id < len(cdf.HouseIndices); id++ {
@@ -940,6 +946,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
+			fmt.Println("SELECT COUNT(*) FROM " + IotDatasetPrefix(cdf.GroupName, cdf.DatasetName) + ";")
 
 		case "query":
 			deviceIdList := make([]string, len(cdf.HouseIndices))
@@ -2054,8 +2061,8 @@ func GetClosestEntity(varName string) (EntityVariableAlias, error) {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// Automatically extract values.
-func ExtractSimilarEntities(entityIRI string) []Similarity { // exported
+// extract values.
+func ExtractSimilarEntities(entityIRI string) []Similarity {
 	query := "query=" + graphDbPrefix + "SELECT%20%3Fentity%20%3Fscore%20%7B%0A%3Fsearch%20a%20inst%3Amerged_sim_ndx%20%3B%0Apsi%3AsearchEntity%20%3C" +
 		url.QueryEscape(entityIRI) + graphDbPostfix
 	jsonSimilarity, _ := queryGraphDB(query)
@@ -2694,7 +2701,30 @@ func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvD
 	iotdbDataFile.XsvSummaryTypeMap()
 	err = iotdbDataFile.ReadCsvFile(iotdbDataFile.DataFilePath, true) // isDataset: yes
 	checkErr("ReadCsvFile ", err)
+	changed, tiny := iotdbDataFile.NormalizeValues()
+	if changed > 0 {
+		fmt.Print(changed)
+		fmt.Print(" tiny values changed to 0 [< ")
+		fmt.Print(tiny)
+		fmt.Println("]")
+	}
 	return iotdbDataFile, nil
+}
+
+// Change tiny values to 0, not null.
+func (iot *IoTDbCsvDataFile) NormalizeValues() (int, float64) {
+	const minimum = 10e-10
+	count := 0
+	for ndx1 := 0; ndx1 < len(iot.Dataset[0]); ndx1++ { // number of columns
+		for ndx2 := 1; ndx2 < len(iot.Dataset); ndx2++ { // number of rows
+			fval, err := strconv.ParseFloat(iot.Dataset[ndx2][ndx1], 64)
+			if err == nil && fval < minimum {
+				iot.Dataset[ndx2][ndx1] = "0"
+				count++
+			}
+		}
+	}
+	return count, minimum
 }
 
 // Include percentage of missing data, which can be got from a SELECT count(*) from root.datasets.etsi.household_data_1min_singleindex;
@@ -2807,7 +2837,7 @@ func (iot *IoTDbCsvDataFile) GetStartEndDates() (string, string) {
 		eDate = eDate[0:10]
 	}
 	fmt.Println(sDate)
-	fmt.Println(eDate) //<<<<
+	fmt.Println(eDate) //<<<
 	return sDate, eDate
 }
 
@@ -2870,7 +2900,7 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 	return str
 }
 
-// Expects comma-separated files. Assigns Dataset or Summary. REFACTOR
+// Expects comma-separated files. Assigns Dataset or Summary.
 func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error {
 	f, err := os.Open(filePath)
 	checkErr("Unable to read csv file: ", err)
@@ -2993,7 +3023,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
-			//fmt.Println(sql)
+			fmt.Println("show timeseries " + IotDatasetPrefix(iot.GroupName, iot.DatasetName) + ".*;")
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			deleteStatements := make([]string, 0)
@@ -3042,15 +3072,14 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 				_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(insert.String() + ";") // (r *common.TSStatus, err error)
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
-				//WriteStringToFile(HomeDirectory+"Downloads/block"+strconv.Itoa(block)+".txt", insert.String())
 			}
-			fmt.Println()
+			fmt.Println("SELECT COUNT(*) FROM " + IotDatasetPrefix(iot.GroupName, iot.DatasetName) + ";")
 
 		case "query":
 			iotdbTimeseriesList := iot.GetTimeseriesList([]string{iot.GroupName + "."}, iot.DatasetName+".")
 			outputPath := GetOutputPath(iot.DataFilePath, ".sql")
 			itp := IotdbTimeseriesProfile{}
-			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) // 1 was cdf.QueryResults
+			err := WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false)
 			checkErr("WriteTextLines(query)", err)
 
 		case "example": // serialize saref class file:
