@@ -1,0 +1,41 @@
+<rdf:RDF
+      xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+      xmlns:foaf="http://xmlns.com/foaf/0.1/"
+      xmlns:dc="http://purl.org/dc/elements/1.1/"
+      xmlns:bibo="http://purl.org/ontology/bibo/"
+      xmlns:dcterms="http://purl.org/dc/terms/"
+      xmlns:ical="http://www.w3.org/2002/12/cal/ical#"
+      xmlns:geo="http://www.w3.org/2003/01/geo/wgs84_pos#" >
+
+  <foaf:PersonalProfileDocument rdf:about="">
+    <foaf:maker rdf:resource="#DavidGnabasik"/>
+    <foaf:primaryTopic rdf:resource="#DavidGnabasik"/>
+  </foaf:PersonalProfileDocument>
+
+ <foaf:Person>
+   <foaf:name>David Gnabasik</foaf:name>
+   <foaf:Organization>MINES</foaf:Organization>
+   <foaf:mbox>David.Gnabasik@emse.fr</foaf:mbox>
+   <foaf:sha1>ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDb6/X7MkDXYNZma3jfgmbTZm/GsiGZvzi7fI9Tln6cPoxqdNqWwxztJDZp8yLv1tGuCKnE+6MIbZxXvqoPMCYasJjDeGARLKHlORKNCLcYf0AXDdegrsbp71igr+p8jhPXO5wZAfw5h+746or6fuzynqL/m2bgZpJfiQ4mZpSftf4+fuC/S/0TZNo7VBnzDa18W05eWHPLmyBvwCg/SMe8HVOqfqDEz3CSlNwebs/rU6ca2YPkVit/8OWR5STJBoVjsBAUiQI2WYy+TR6BxQ0FhxvH1ZlDfaRuMKotnn5Wqt3HFHKrLW3F+GrPpRDkjQlHpt2vGcJbvHgmBw79QTgoLgiaCbiss0wCRB5DG3Dt7uGKskyFZ9tQg4gVd5wvO6Xop65TAFxDr5Vjphbf4eQwtXcXBrhKJQ+QGinAEthl30u0k0SY268taj9ZFdI7JEOMMevA6hiuuFkPlYj9/dg+6DLUeBLyuwhvwKo3TjJFFl6htgEQAPm2NcKJr7LMu/0= david@david-NUC10i5FNH</foaf:sha1>
+
+   <!-- knows -->
+   <foaf:knows rdf:resource="#ChatGuillaume"/>
+
+   <!-- projects -->
+   <foaf:currentProject>
+     <foaf:Project>
+     <foaf:organization>IoT Data Streaming Server</foaf:organization>
+       <foaf:homepage rdf:resource="https://saref.etsi.org/saref4data/v1.0.1/datasets/" />
+     </foaf:Project>
+   </foaf:currentProject> 
+
+ </foaf:Person>
+
+  <!-- groups -->
+  <foaf:Group rdf:ID="IotDataStreamingServer">
+    <foaf:name>IoT Data Streaming Server</foaf:name>
+    <foaf:member rdf:resource="#DavidGnabasik"/>
+  </foaf:Group>
+
+</rdf:RDF>

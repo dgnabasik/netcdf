@@ -1,5 +1,13 @@
 package main
 
+/*TODO:
+Assign TimeMeasurementName.
+Specify output={no data, summary, all data}
+Calculate timeIndex.
+Complete UploadFile()
+Complete UploadGraph()
+*/
+
 // Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
 // Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
 // IotDB Data Model: https://iotdb.apache.org/UserGuide/Master/Data-Concept/Data-Model-and-Terminology.html
@@ -762,10 +770,25 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	cdf.Measurements[LastColumnName] = &mv
 }
 
-// Change tiny values to 0.
-func (cdf *NetCDF) NormalizeValues() int {
-	count := 0
-	return count
+// Change tiny values to 0, not null.
+func (cdf *NetCDF) NormalizeValues() {
+	const minimum = 10e-10
+	changed := 0
+	for ndx1 := 0; ndx1 < len(cdf.Dataset[0]); ndx1++ { // number of columns
+		for ndx2 := 1; ndx2 < len(cdf.Dataset); ndx2++ { // number of rows
+			fval, err := strconv.ParseFloat(cdf.Dataset[ndx2][ndx1], 64)
+			if err == nil && fval < minimum {
+				cdf.Dataset[ndx2][ndx1] = "0"
+				changed++
+			}
+		}
+	}
+	if changed > 0 {
+		fmt.Print(changed)
+		fmt.Print(" tiny values changed to 0 [< ")
+		fmt.Print(minimum)
+		fmt.Println("]")
+	}
 }
 
 // If there are no values at all in the block, IoTDB does not write the measurement, so get mismatch between number of INSERT field names and VALUES (e.g., HeatingEquipmentStage3_RunTime)
@@ -1470,8 +1493,19 @@ func getExternalReferences() string {
 }
 
 // Expects nginx server running at http://localhost:80/datasets
-// Upload JSON descriptor files, turtle files, SPARQL query files.
+// Upload JSON descriptor file, turtle file, SPARQL query file into ../datasets/<group.device>/artifacts folder (and all other supporting docs).
 func UploadFile(destinationUrl string, lines []string) error {
+	//<<<
+	return nil
+}
+
+func UploadGraph(repositoryName string, turtleDef []string) error {
+	//<<<
+	return nil
+}
+
+// Query GraphDB repository and export RDF in Turtle format: Explore => Graphs overview => Export repository => Turtle.
+func OutputGraphRdf(repositoryName string, turtleDef []string) error {
 	//<<<
 	return nil
 }
@@ -1602,7 +1636,7 @@ func LoadNcSensorDataIntoDatabase(programArgs []string) {
 }
 
 func LoadHd5SensorDataIntoDatabase(programArgs []string) {
-	// <<<
+
 }
 
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
@@ -2297,7 +2331,7 @@ func GetClassByState() []ClassSuperClass {
 				fmt.Println(baseClassEntity + "  ::  " + superClassEntity)
 			} else {
 				fmt.Println()
-				//classSuperClass = append(classSuperClass, ClassSuperClass{Entity: entityName, SuperClass: toks[3]}) // <<<
+				//classSuperClass = append(classSuperClass, ClassSuperClass{Entity: entityName, SuperClass: toks[3]})
 			}
 			oldEntityName = baseClassEntity
 		}
@@ -2459,7 +2493,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	return unknown
 }
 
-var timeSeriesCommands = []string{"example", "drop", "create", "delete", "insert", "query"}
+var timeSeriesCommands = []string{"example", "drop", "create", "delete", "insert", "query", "upload"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
@@ -2701,30 +2735,29 @@ func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvD
 	iotdbDataFile.XsvSummaryTypeMap()
 	err = iotdbDataFile.ReadCsvFile(iotdbDataFile.DataFilePath, true) // isDataset: yes
 	checkErr("ReadCsvFile ", err)
-	changed, tiny := iotdbDataFile.NormalizeValues()
-	if changed > 0 {
-		fmt.Print(changed)
-		fmt.Print(" tiny values changed to 0 [< ")
-		fmt.Print(tiny)
-		fmt.Println("]")
-	}
+	iotdbDataFile.NormalizeValues()
 	return iotdbDataFile, nil
 }
 
 // Change tiny values to 0, not null.
-func (iot *IoTDbCsvDataFile) NormalizeValues() (int, float64) {
+func (iot *IoTDbCsvDataFile) NormalizeValues() {
 	const minimum = 10e-10
-	count := 0
+	changed := 0
 	for ndx1 := 0; ndx1 < len(iot.Dataset[0]); ndx1++ { // number of columns
 		for ndx2 := 1; ndx2 < len(iot.Dataset); ndx2++ { // number of rows
 			fval, err := strconv.ParseFloat(iot.Dataset[ndx2][ndx1], 64)
 			if err == nil && fval < minimum {
 				iot.Dataset[ndx2][ndx1] = "0"
-				count++
+				changed++
 			}
 		}
 	}
-	return count, minimum
+	if changed > 0 {
+		fmt.Print(changed)
+		fmt.Print(" tiny values changed to 0 [< ")
+		fmt.Print(minimum)
+		fmt.Println("]")
+	}
 }
 
 // Include percentage of missing data, which can be got from a SELECT count(*) from root.datasets.etsi.household_data_1min_singleindex;
@@ -3087,6 +3120,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			outputPath := GetOutputPath(iot.DataFilePath, serializationExtension)
 			err := WriteTextLines(ttlLines, outputPath, false)
 			checkErr("WriteTextLines(example)", err)
+
+		case "upload": // upload any artifact files. <<<<
 
 		}
 		fmt.Println("Timeseries <" + command + "> completed.")
