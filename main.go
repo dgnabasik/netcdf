@@ -432,7 +432,7 @@ func (cdf NetCDF) ToString(outputVariables bool) string {
 	return sb.String()
 }
 
-// Output struct as JSON.
+// Output struct as JSON. NOT USED.
 func (cdf NetCDF) Format_Json() ([]string, error) {
 	lines := make([]string, 0)
 	json, err := json.MarshalIndent(cdf, "", "  ")
@@ -1493,7 +1493,7 @@ func getExternalReferences() string {
 }
 
 // Expects nginx server running at http://localhost:80/datasets
-// Upload JSON descriptor file, turtle file, SPARQL query file into ../datasets/<group.device>/artifacts folder (and all other supporting docs).
+// Upload descriptor file, turtle file, SPARQL query file into ../datasets/<group.device>/artifacts folder (and all other supporting docs).
 func UploadFile(destinationUrl string, lines []string) error {
 	//<<<
 	return nil

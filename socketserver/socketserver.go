@@ -1,3 +1,4 @@
+// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/TSDB-Comparison.html
 // Create a separate Goroutine to serve each TCP client.  Execute netcat to test: nc 127.0.0.1 <port>
 // lsof -Pnl +M -i4	or -i6		netstat -tulpn
 // sudo nmap localhost => 9898/tcp open  monkeycom  (because it uses gorilla/websocket - haha)
@@ -159,7 +160,7 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-type TimeseriesMetadata struct {
+type TimeseriesMetadata struct { //<<<<
 	Description string `json:"description"`
 }
 
@@ -230,13 +231,6 @@ func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfil
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-var clients IoTDbAccess
-
-/* <<<<
-var clients = make(map[*websocket.Conn]bool)
-metadata, found := GetTimeseriesMetadata(GetMetadataFilename(programArgs[1]))
-*/
-
 type IoTDbAccess struct {
 	session            client.Session
 	Sql                string          `json:"sql"`
@@ -245,6 +239,7 @@ type IoTDbAccess struct {
 	QueryResults       []string        `json:"queryresults"`       // every message the client will ever get
 	socketserver       *websocket.Conn // new fields
 	mutex              sync.Mutex
+	Guid               string                   `json:"guid"`
 	UserName           string                   `json:"username"`
 	TimeseriesList     []IotdbTimeseriesProfile `json:"timeserieslist"`
 	QueryIndex         int                      `json:"queryindex"` // index of current message sent to client
@@ -294,11 +289,12 @@ func (iotAccess *IoTDbAccess) PrintMessage(msg string) {
 // data synthetic.IoT_Motion_Light interval 0.5 format csv
 // data synthetic.IoT_Thermostat interval 0.5 format csv LIMIT 100
 // Only GetTimeseriesData() appends <end of data> message.
-func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, parameters []string) {
-	if err := clients.session.Open(false, 0); err != nil {
+func (iotAccess *IoTDbAccess) GetTimeseriesData(guid, datasetName, groupName string, parameters []string) {
+	client := clients[guid]
+	if err := client.session.Open(false, 0); err != nil {
 		checkErr("GetTimeseriesData: ", err)
 	}
-	defer clients.session.Close()
+	defer client.session.Close()
 
 	// process parameters and construct SQL. ORDER BY Time does not work if client requests random sample
 	iotAccess.Sql = "SELECT * FROM " + EtsidataRoot + "." + datasetName + "." + groupName + " ORDER BY Time ASC "
@@ -447,13 +443,13 @@ func (iotAccess *IoTDbAccess) GetTimeseriesData(datasetName, groupName string, p
 }
 
 // SELECT COUNT(*) FROM root.etsidata.synthetic.IoT_Motion_Light;
-func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) {
+func (iotAccess *IoTDbAccess) GetTimeseriesCount(guid, datasetName, groupName string) {
 	const cwidth1 = 9
-
-	if err := clients.session.Open(false, 0); err != nil {
+	client := clients[guid]
+	if err := client.session.Open(false, 0); err != nil {
 		checkErr("GetTimeseriesCount: ", err)
 	}
-	defer clients.session.Close()
+	defer client.session.Close()
 
 	iotAccess.Sql = "SELECT COUNT(*) FROM " + EtsidataRoot + "." + datasetName + "." + groupName + ";"
 	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
@@ -493,11 +489,12 @@ func (iotAccess *IoTDbAccess) GetTimeseriesCount(datasetName, groupName string) 
 
 // Assign iotAccess.[]IotdbTimeseriesProfile
 // |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-func (iotAccess *IoTDbAccess) GetTimeseriesList(datasetName string, groupNames []string) {
-	if err := clients.session.Open(false, 0); err != nil {
+func (iotAccess *IoTDbAccess) GetTimeseriesList(guid, datasetName string, groupNames []string) {
+	client := clients[guid]
+	if err := client.session.Open(false, 0); err != nil {
 		checkErr("GetTimeseriesList: ", err)
 	}
-	defer clients.session.Close()
+	defer client.session.Close()
 
 	const blockSize = 11
 	iotAccess.TimeseriesList = make([]IotdbTimeseriesProfile, 0) // want multiples of this number
@@ -574,31 +571,31 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 	case "groups":
 		datasetName := "*"
 		groupNames := []string{""}
-		iotAccess.GetTimeseriesList(datasetName, groupNames)
+		iotAccess.GetTimeseriesList(iotAccess.Guid, datasetName, groupNames)
 
 	case "group.device": // show timeseries root.etsidata.synthetic.**;
 		datasetName := tokens[1] + "."
 		groupNames := []string{"*"}
-		iotAccess.GetTimeseriesList(datasetName, groupNames)
+		iotAccess.GetTimeseriesList(iotAccess.Guid, datasetName, groupNames)
 
 	case "timeseries": // <group.device>    show timeseries root.etsidata.synthetic.IoT_Motion_Light.*;
 		tokens2 := strings.Split(tokens[1], ".")
 		datasetName := tokens2[0] + "."
 		groupNames := []string{tokens2[1] + "."}
-		iotAccess.GetTimeseriesList(datasetName, groupNames)
+		iotAccess.GetTimeseriesList(iotAccess.Guid, datasetName, groupNames)
 
 	case "count": // <group.device>		SELECT COUNT(*) FROM root.etsidata.synthetic.IoT_Motion_Light;
 		tokens2 := strings.Split(tokens[1], ".")
 		datasetName := tokens2[0]
 		groupName := tokens2[1]
-		iotAccess.GetTimeseriesCount(datasetName, groupName)
+		iotAccess.GetTimeseriesCount(iotAccess.Guid, datasetName, groupName)
 
 	case "data": // data <group.device> interval <1> format <csv>    SELECT status, temperature FROM root.ln.wf01.wt01 WHERE temperature < 24 and time > 2017-11-1 0:13:00
 		tokens2 := strings.Split(tokens[1], ".")
 		datasetName := tokens2[0]
 		groupName := tokens2[1]
 		parameters := tokens[2:]
-		iotAccess.GetTimeseriesData(datasetName, groupName, parameters)
+		iotAccess.GetTimeseriesData(iotAccess.Guid, datasetName, groupName, parameters)
 
 	case "logout":
 		//iotAccess.ActiveSession = false
@@ -614,7 +611,7 @@ func (iotAccess *IoTDbAccess) RoutingParser(clientCommand string) bool {
 }
 
 // Check if incoming request from a different domain is allowed to connect; get CORS.
-// Connections support one concurrent reader and one concurrent writer.
+// Gorilla websocket connections support one concurrent reader and one concurrent writer.
 // The server must enforce an origin policy using the Origin request header sent by the browser.
 func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request) {
 	// Limit the buffer sizes to the maximum expected message size.
@@ -627,7 +624,7 @@ func (iotAccess *IoTDbAccess) wsEndpoint(w http.ResponseWriter, r *http.Request)
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	iotAccess.socketserver, _ = upgrader.Upgrade(w, r, nil)
 	log.Println("Client connected.")
-	iotAccess.mutex.Lock()
+	iotAccess.mutex.Lock() // possible bottleneck!
 	defer iotAccess.mutex.Unlock()
 	err := iotAccess.socketserver.WriteMessage(1, []byte("Available commands: "+strings.Join(DatabaseCommands, "; ")))
 	if err != nil {
@@ -668,14 +665,15 @@ func (iotAccess *IoTDbAccess) reader() {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-func setupRoutes() {
-	iotdbConnection, ok := Init_IoTDB(true)
-	if !ok {
-		checkErr("Init_IoTDB: ", errors.New(iotdbConnection))
-	}
-	clients = IoTDbAccess{ActiveSession: true, session: client.NewSession(clientConfig)}
-	http.HandleFunc("/", homePage) // http.FileServer(http.Dir("./jsclient"))
-	http.HandleFunc("/ws", clients.wsEndpoint)
+var clients = make(map[string]IoTDbAccess) // [guid]
+
+// create client and its routes. Every client gets copy of same clientConfig. REFACTOR
+func SetupClientRoutes(guid string) {
+	clientSession := client.NewSession(clientConfig) // <<< NewSessionPool(config, 3, 60000, 60000, false)
+	clients[guid] = IoTDbAccess{ActiveSession: true, Guid: "<<<<", session: clientSession}
+	http.HandleFunc("/", homePage)
+	client := clients[guid]
+	http.HandleFunc("/ws", client.wsEndpoint)
 	fmt.Println("Routes established.")
 }
 
@@ -683,11 +681,17 @@ func main() {
 	flag.Parse()
 	log.SetFlags(0)
 	WSPORT := ":" + os.Getenv("WSPORT")
-	fmt.Println("The socketserver program only reads from the the IoT and Graph databases.")
+	iotdbConnection, ok := Init_IoTDB(true)
+	if !ok {
+		checkErr("Init_IoTDB: ", errors.New(iotdbConnection))
+	}
+	guid := "guid"
+	if len(os.Args) > 1 {
+		guid = os.Args[1]
+	}
+	SetupClientRoutes(guid)
+	//fmt.Println("The socketserver program only reads from the the IoT and Graph databases.")
 	fmt.Println("Server is listening on " + WSHOST + WSPORT + " ...")
-	//currentUser, _ := user.Current()
-	//fmt.Println(currentUser.Username) // .Name .Uid
-	setupRoutes()
 	log.Fatal(http.ListenAndServe(*addr, nil))
 }
 

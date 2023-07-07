@@ -4,10 +4,10 @@
 @prefix void: <http://rdfs.org/ns/void#> .
 
 [] a sd:Service ;
-    sd:endpoint <http://www.example/sparql/> ;
+    sd:endpoint <https://saref.etsi.org/saref4data/v1.0.1/services/Authentication/> ;
     sd:supportedLanguage sd:SPARQL11Query ;
     sd:resultFormat <http://www.w3.org/ns/formats/RDF_XML>, <http://www.w3.org/ns/formats/Turtle> ;
-    sd:extensionFunction <http://example.org/Distance> ;
+    sd:extensionFunction <https://saref.etsi.org/saref4data/v1.0.1/functions/Distance> ;
     sd:feature sd:DereferencesURIs ;
     sd:defaultEntailmentRegime ent:RDFS ;
     sd:defaultDataset [
@@ -18,7 +18,7 @@
         ] ;
         sd:namedGraph [
             a sd:NamedGraph ;
-            sd:name <http://www.example/named-graph> ;
+            sd:name <https://saref.etsi.org/saref4data/v1.0.1//namedgraphs/NG1> ;
             sd:entailmentRegime ent:OWL-RDF-Based ;
             sd:supportedEntailmentProfile prof:RL ;
             sd:graph [
@@ -28,4 +28,4 @@
         ]
     ] .
 
-<http://example.org/Distance> a sd:Function .
+<https://saref.etsi.org/saref4data/v1.0.1/functions/Distance> a sd:Function .
