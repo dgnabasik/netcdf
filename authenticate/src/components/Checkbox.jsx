@@ -1,7 +1,8 @@
+// Checkbox.jsx
 import { useState } from "react";
-import "./checkbox.css";
+import "./css/checkbox.css";
 
-function Checkbox() {
+function Checkbox(cboxKey, cboxValue) {
   const [isChecked, setIsChecked] = useState(false);
 
   const handleChange = (event) => {
@@ -14,16 +15,15 @@ function Checkbox() {
         <input
           className="checkbox__input"
           type="checkbox"
-          name="color"
+          name={cboxKey}
           checked={isChecked}
           onChange={handleChange}
         />
-        Blue
+        {cboxValue}
       </label>
-
-      {isChecked && <div>Blue is selected!</div>}
     </form>
   );
 }
+//       {isChecked && <div>Blue is selected!</div>}
 
 export default Checkbox;
