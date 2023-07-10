@@ -4,7 +4,7 @@ import Checkbox from "./components/Checkbox/Checkbox";
 import Multiple from "./components/Multiple/Multiple";
 import Uncontrolled from "./components/Uncontrolled/Uncontrolled";
 import Controlled from "./components/Controlled/Controlled";
-import ReactHookForm from "./components/ReackHookForm/Example";
+import AuthenticationForm from "./components/AuthenticationForm/AuthenticationForm";
 import Header from './components/Header/Header';
 
 const App = () => {
@@ -17,7 +17,7 @@ const App = () => {
       {/* <Multiple /> */}
       {/* <Validate /> */}
       {/* <Uncontrolled /> */}
-      <ReactHookForm />
+      <AuthenticationForm />
     </div>
   );
 };
