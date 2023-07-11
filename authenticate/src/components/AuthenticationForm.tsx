@@ -8,7 +8,7 @@ import UserGroups from "./UserGroups";
 
 // https://email-checker.net/check  https://www.verifyemailaddress.org/
 // https://www.digitalocean.com/community/tutorials/how-to-set-up-ssh-keys-on-ubuntu-20-04
-// TODO: Become a member of list of Checkboxes for available Group.ID+names.
+// TODO: Render the list of Checkboxes for available Group.ID+names.
 // TODO: output rdf code; button to upload.
 // TODO: INSERT into GraphDB.
 
@@ -195,7 +195,7 @@ const Select = forwardRef<HTMLSelectElement, IAuthenticationProps> (({ options, 
         {...register("sha1", { required: false })}
       />
 
-      <UserGroups UserGroupProps={userGroups} />
+      <UserGroups UserGroupProps={[ ...userGroups.values() ]} />
 
       <button className="hook__button" type="submit">
         Check form

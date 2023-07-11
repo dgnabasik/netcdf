@@ -4,7 +4,7 @@ import "./css/checkbox.css";
 
 function Checkbox(cboxKey, cboxValue) {
   const [isChecked, setIsChecked] = useState(false);
-
+console.log(cboxKey +":"+cboxValue);//<<<
   const handleChange = (event) => {
     setIsChecked(event.target.checked);
   };
