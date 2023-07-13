@@ -142,6 +142,11 @@ function AuthenticationForm() {
 
   // async functions always return a promise.
   const validateEmail = async (value:string) => {
+    if (!value.toLowerCase().includes("@emse.fr")) {
+      setErrorMessage("only @emse.fr mailboxes accepted...")
+      setValidEmail(false);  
+      return;
+    }
     const apiKey:string = "8edb0e203e0c2d1a9e87746f64de9a18";
     const apiUrl: string = "http://apilayer.net/api/check?access_key=" + apiKey + "&email=" + value + "&smtp=1&format=1";
     const response = await fetch(apiUrl);
