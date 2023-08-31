@@ -74,16 +74,16 @@ read -p "?"
 ./netcdf /home/david/Documents/digital-twins/combed.iiitd/datasets/lecture_Floor_Total_Current2.csv utc_timestamp init create insert
 
 read -p "?"
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jan_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Feb_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Mar_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Apr_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/May_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jun_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jul_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Aug_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Sep_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Oct_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Nov_clean.nc ??? time init create insert
-./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Dec_clean.nc ??? time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jan_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Feb_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Mar_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Apr_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/May_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jun_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jul_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Aug_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Sep_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Oct_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Nov_clean.nc netCDF-4 time init create insert
+./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Dec_clean.nc netCDF-4 time init create insert
 

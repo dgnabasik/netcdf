@@ -54,6 +54,7 @@ const ( // these do not include trailing >
 	timeAlias              = "time1"
 	blockSize              = 163840 //=20*8192 	131072=16*8192
 	maxColumns             = 256
+	maxRows                = 256
 	interpolated           = "interpolated"
 	unitsName			   = "units"
 )
@@ -101,7 +102,6 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-// for both IotDB & GraphDB.
 //var databaseCommands = []string{"groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>"}
 
 // Separate struct if we want slice of these in container class.
@@ -400,7 +400,7 @@ func formatFloat(str string) float64 {
 
 // Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
 // Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
-func (cdf NetCDF) Format_Ontology() []string {
+func (cdf NetCDF) Format_Ontology_Interconnect() []string {
 	startDate, endDate := cdf.GetStartEndDates()
 	baseline := GetBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
@@ -529,9 +529,8 @@ func (cdf *NetCDF) GetColumnNumberFromName(columnName string) int {
 }
 
 func (cdf *NetCDF) GetRowNumberFromName(rowName string) int {
-	for ndx := 0; ndx < maxColumns; ndx++ { 
-		//dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0])
-		if strings.ToLower(cdf.Summary[0][ndx]) == strings.ToLower(rowName) {
+	for ndx := 0; ndx < maxRows; ndx++ { 
+		if strings.ToLower(cdf.Summary[ndx][0]) == strings.ToLower(rowName) {
 			return ndx
 		}
 	}
@@ -542,7 +541,7 @@ func (cdf *NetCDF) GetRowNumberFromName(rowName string) int {
 // TimeMeasurementName: {ecobee:3:units=yyyy-MM-dd hh:mm:ss}
 func (cdf *NetCDF) GetStartEndDates() (string, string) {
 	timeRow := cdf.GetRowNumberFromName(cdf.TimeMeasurementName)  // 2
-	sDate := cdf.Summary[timeRow][3]
+	sDate := cdf.Summary[timeRow][3]	// const
 	eDate := cdf.Summary[timeRow][4]
 	unitsColumn := cdf.GetColumnNumberFromName(unitsName)
 
@@ -559,7 +558,6 @@ func (cdf *NetCDF) GetStartEndDates() (string, string) {
 		sDate = sDate[0:10]
 		eDate = eDate[0:10]
 	}
-
 	return sDate, eDate
 }
 
@@ -812,9 +810,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 				sql = sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 				checkErr("ExecuteNonQueryStatement(createStatement)", err)
-				fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + ".*;")
 			}
-			fmt.Println("Created 'id-Devices' for " + cdf.DatasetName + ": ")
+			fmt.Println("IOTDB TEST QUERY: show timeseries " + cdf.Identifier + ".**;")
 
 		case "delete": // remove all data; retain schema; multiple commands.
 			for id := 0; id < len(cdf.HouseIndices); id++ {
@@ -830,7 +827,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
-			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + ";")
+			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + cdf.Identifier + ".*;")
 
 		case "query":
 			deviceIdList := make([]string, len(cdf.HouseIndices))
@@ -842,8 +839,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			err := filesystem.WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), cdf.DataFilePath+"/"+cdf.DatasetName+".sql", false) //<<<
 			checkErr("WriteTextLines(query)", err)*/
 
-		case "example": // serialize saref class file:
-			ttlLines := cdf.Format_Ontology()
+		case "ontology": // serialize saref class file:
+			ttlLines := cdf.Format_Ontology_Interconnect()
 			err := InsertOntologyIntoGraphDB(cdf.Identifier, ttlLines)
 			checkErr("InsertNamedGraphOntology(example)", err)
 
@@ -1352,19 +1349,18 @@ func getExternalReferences() string {
 		`s4auto:Confidence a owl:Class .` + crlf
 }
 
-/* <<<< Read IoTMetadata summary file and Write as time series metadata ontology into GraphDB. 
+/*<<<< Read IoTMetadata summary file and Write as time series metadata ontology into GraphDB. 
 For each IoT time series, list the number of given values and missing values per measurement.
 SELECT COUNT(*) FROM root.etsidata.Jan_clean.00248d5f9ecd01a008b95d6f5a79688db7f8344c;
 Make the dataset its own Interconnect ontology Class and load into GraphDB as Named Graph. 
 func (iot *IoTMetadata) Format_TurtleOntology() []string 
-func (iot *IoTMetadata) OutputDescription(displayColumnInfo bool) string 
+func (iot *IoTMetadata) OutputDescription(displayColumnInfo bool) string DON'T NEED.
 Initialize_IoTDbDataFile(programArgs []string) (IoTMetadata, error) 
 */
 func InsertOntologyIntoGraphDB(iotIdentifier string, ttlLines []string) error {
 	// namedGraph := (iotIdentifier)
 	return nil
 }
-
 
 func prettifyString(str string) string {
 	s := strings.TrimSpace(strings.ReplaceAll(str, "\"", ""))
@@ -1458,16 +1454,11 @@ func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, er
 	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, datasetName, programArgs, isActive)
 	checkErr("ParseVariableFile", err)
 	//fmt.Println(xcdf.ToString(true)) // true => output variables
-
 	err = xcdf.ReadCsvFile(GetSummaryFilename(programArgs[1]), false) // isDataset: no, is summary
 	checkErr("ReadCsvFile ", err)
 	
 	xcdf.TimeMeasurementName = programArgs[3]
 	xcdf.XsvSummaryTypeMap()
-	ontology := xcdf.Format_Ontology() 
-	err = InsertOntologyIntoGraphDB(xcdf.Identifier, ontology)
-	checkErr("InsertNamedGraphOntology(example)", err)
-
 	return xcdf, nil
 }
 
@@ -1555,8 +1546,10 @@ const (
 
 // Return a NamedIndividual unit_of_measure from an abreviated key. All of these are specified at the uomPrefix URI.
 // This expects you to manually add the map keys to the (last) Units column header in every *.var file.
+// REFACTOR to get from website?
 func GetNamedIndividualUnitMeasure(uom string) string {
 	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
+	const varPrefix = "https://energyknowledgebase.com/topics/volt-ampere-reactive-var.asp"
 	var unitsOfMeasure = map[string]string{
 		"kW":     uomPrefix + "kilowatt",
 		"kWh":    uomPrefix + "kilowattHour",
@@ -1568,7 +1561,17 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 		"mb":     uomPrefix + "millibar",
 		"degree": uomPrefix + "degree",
 		"lux":    uomPrefix + "lux",
-		"km":     uomPrefix + "kilometre"}
+		"km":     uomPrefix + "kilometre",
+		"dV":	  uomPrefix + "decivolt",
+		"dA":	  uomPrefix + "deciampere",
+		"Hz":	  uomPrefix + "hertz",
+		"DPF":	  "https://ctlsys.com/support/power_factor/",
+		"APF":	  "https://ctlsys.com/support/power_factor/",
+		"VAR":	  varPrefix,
+		"VAR.hour":	varPrefix,
+		"VA":	  : "https://en.wikipedia.org/wiki/Volt-ampere",
+		"VA.hour" : "https://en.wikipedia.org/wiki/Volt-ampere"
+	}
 
 	switch uom {
 	case "km":
@@ -1652,7 +1655,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	return unknown
 }
 
-var timeSeriesCommands = []string{"example", "init", "create", "drop", "delete", "insert", "query"}
+var timeSeriesCommands = []string{"ontology", "init", "create", "drop", "delete", "insert", "query"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
@@ -1945,9 +1948,9 @@ func (iot *IoTDbCsvDataFile) GetColumnNumberFromName(columnName string) int {
 }
 
 func (iot *IoTDbCsvDataFile) GetRowNumberFromName(rowName string) int {
-	for ndx := 0; ndx < maxColumns; ndx++ { 
+	for ndx := 0; ndx < maxRows; ndx++ { 
 		//dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0])
-		if strings.ToLower(iot.Summary[0][ndx]) == strings.ToLower(rowName) {
+		if strings.ToLower(iot.Summary[ndx][0]) == strings.ToLower(rowName) {
 			return ndx
 		}
 	}
@@ -1958,7 +1961,7 @@ func (iot *IoTDbCsvDataFile) GetRowNumberFromName(rowName string) int {
 // TimeMeasurementName: {opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	HomeC:2:units=unixutc	ton.iot:2:units=unixutc}
 func (iot *IoTDbCsvDataFile) GetStartEndDates() (string, string) {
 	timeRow := iot.GetRowNumberFromName(iot.TimeMeasurementName)  // 1
-	sDate := iot.Summary[timeRow][3]
+	sDate := iot.Summary[timeRow][3]	// const
 	eDate := iot.Summary[timeRow][4]
 	unitsColumn := iot.GetColumnNumberFromName(unitsName)
 
@@ -1975,8 +1978,6 @@ func (iot *IoTDbCsvDataFile) GetStartEndDates() (string, string) {
 		sDate = sDate[0:10]
 		eDate = eDate[0:10]
 	}
-	fmt.Println(sDate)
-	fmt.Println(eDate) //<<<
 	return sDate, eDate
 }
 
@@ -2058,7 +2059,7 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 // Produce DatatypeProperty ontology from summary & dataset. Write to filesystem, then upload to website.
 // Make the dataset its own Class and loadable into GraphDB. Special handling: "dateTime", "XMLLiteral", "anyURI"
 // Expect timestamp as first measurement row.
-func (iot *IoTDbCsvDataFile) Format_Ontology() []string {
+func (iot *IoTDbCsvDataFile) Format_Ontology_Interconnect() []string {
 	startDate, endDate := iot.GetStartEndDates()
 	baseline := GetBaselineOntology(iot.DatasetName, iot.DatasetName, iot.Description, startDate, endDate)
 	output := strings.Split(baseline, crlf)
@@ -2228,8 +2229,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			err := filesystem.WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) 
 			checkErr("WriteTextLines(query)", err)*/
 
-		case "example": // serialize saref class file: 
-			ttlLines := iot.Format_Ontology()
+		case "ontology": // serialize saref class file: 
+			ttlLines := iot.Format_Ontology_Interconnect()
 			err := InsertOntologyIntoGraphDB(iot.Identifier, ttlLines)
 			checkErr("InsertNamedGraphOntology(example)", err)
 		}
