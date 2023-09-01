@@ -72,7 +72,6 @@ read -p "?"
 ./netcdf /home/david/Documents/digital-twins/combed.iiitd/datasets/UPS_Sockets_Current.csv utc_timestamp init create insert
 ./netcdf /home/david/Documents/digital-twins/combed.iiitd/datasets/lecture_Floor_Total_Current1.csv utc_timestamp init create insert
 ./netcdf /home/david/Documents/digital-twins/combed.iiitd/datasets/lecture_Floor_Total_Current2.csv utc_timestamp init create insert
-
 read -p "?"
 ./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Jan_clean.nc netCDF-4 time init create insert
 ./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Feb_clean.nc netCDF-4 time init create insert
@@ -86,4 +85,32 @@ read -p "?"
 ./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Oct_clean.nc netCDF-4 time init create insert
 ./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Nov_clean.nc netCDF-4 time init create insert
 ./netcdf /home/david/Documents/digital-twins/ecobee/clean_data/Dec_clean.nc netCDF-4 time init create insert
+read -p "?"
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_B1E.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_B2E.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_BME.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_CDE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_CWE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_DNE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_DWE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_EBE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_EQE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_FGE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_FRE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_GRE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_HPE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_HTE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_OFE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_OUE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_RSE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_TVE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_UTE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_WHE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_WOE.csv unix_ts init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_I.csv UNIX_TS init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_P.csv UNIX_TS init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_Q.csv UNIX_TS init create insert
+./netcdf /home/david/Documents/digital-twins/AMP/Electricity_S.csv UNIX_TS init create insert
+
+echo Done!
 
