@@ -63,18 +63,6 @@ var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "di
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
 var timeout int64 = 1000
 
-/*
-Discrete uniform distribution: All outcomes are equally likely.
-Bernoulli Distribution: Single-trial with two possible outcomes.
-Binomial Distribution: A sequence of Bernoulli events.
-Poisson Distribution: The probability that an event may or may not occur.
-Normal Distribution: Symmetric distribution of values around the mean.
-Student t-Test Distribution: Small sample size approximation of a normal distribution.
-Exponential distribution: Model elapsed time between two events.
-Gamma distribution: Describes the time to wait for a fixed number of events.
-Weibull Distribution: Describes a waiting time for one event, if that event becomes more or less likely with time.
-*/
-
 func GetSummaryFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
 	return filepath.Dir(dataFilePath) + "/summary_" + fileName[:len(fileName)-len(filepath.Ext(fileName))] + csvExtension
@@ -726,7 +714,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 // mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	iotPrefix := IotDatasetPrefix(cdf.Identifier, "{device-id}")
-	const createMsg string = " time series not found -- run this program with the create parameter first " // also get this if no data in column
+	const createMsg string = " time series not found -- run this program with the `create` parameter first " // also get this if no data in column
 	fileToRead := cdf.DataFilePath + "/" + cdf.DatasetName + ncExtension
 	nc, err := netcdf.OpenFile(fileToRead, netcdf.NOWRITE)
 	if err != nil {
@@ -2004,7 +1992,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == interpolated
+		theEnd := dataColumnName == interpolated || len(iot.Summary[ndx+1][0]) < 2
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  aliasName, // the CSV field names are often unusable.
@@ -2170,7 +2158,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			//fmt.Println(sql)
+			fmt.Println(sql)//<<<
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
 			fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*;")
