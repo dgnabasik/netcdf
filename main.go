@@ -38,11 +38,6 @@ import (
 
 const ( // these do not include trailing >
 	HomeDirectory          = "/home/david/" // davidgnabasik
-	CurrentVersion         = "v1.0.1/"
-	SarefExtension         = "saref4data/"
-	s4data                 = "s4data:"
-	SarefEtsiOrg           = "https://saref.etsi.org/"
-	DataSetPrefix          = SarefEtsiOrg + SarefExtension + CurrentVersion + "datasets/"
 	serializationExtension = ".ttl" //.trig Classic Turtle does not support named graphs -- output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	csvExtension           = ".csv"
@@ -1182,7 +1177,6 @@ func checkErr(title string, err error) {
 // /////////////////////////////////////////////////////////////////////////////////////////
 // ISO 8601 format: use package iso8601 since The built-in RFC3333 time layout in Go is too restrictive to support any ISO8601 date-time.
 const (
-	OutputLocation = SarefEtsiOrg + "saref4data/v1.0.1/datasets/"
 	TimeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
 	TimeFormat1    = "2006-01-02 15:04:05"
 	TimeFormatNano = "2006-01-02T15:04:05.000Z07:00" // this is the preferred milliseconds version.
