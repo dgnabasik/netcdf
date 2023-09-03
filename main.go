@@ -1,4 +1,4 @@
-package main
+package main	// this program inserts data into IotDB.
 // Getting started with Golang multi-module workspaces: https://go.dev/doc/tutorial/workspaces
 // Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
 // Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
@@ -88,114 +88,6 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
-//var databaseCommands = []string{"groups", "group.device <group>", "timeseries <group.device>", "data <group.device> interval <1s> format <csv>"}
-
-// Separate struct if we want slice of these in container class.
-// Keep these field names different from container structs to avoid confusion.
-type IoTDbAccess struct {
-	session            client.Session
-	Sql                string   `json:"sql"`
-	ActiveSession      bool     `json:"activesession"`
-	TimeseriesCommands []string `json:"timeseriescommands"` // given as command-line parameters
-	QueryResults       []string `json:"queryresults"`
-}
-
-// Assign iotAccess.QueryResults; return []IotdbTimeseriesProfile
-// |Timeseries|Alias|Database|DataType|Encoding|Compression|Tags|Attributes|Deadband|DeadbandParameters|
-func (iotAccess *IoTDbAccess) GetTimeseriesList(identifier string, groupNames []string) []IotdbTimeseriesProfile {
-	const blockSize = 11
-	timeseriesList := make([]IotdbTimeseriesProfile, 0) // want multiples of this number
-	timeseriesItem := IotdbTimeseriesProfile{}
-	for groupIndex := 0; groupIndex < len(groupNames); groupIndex++ {
-		iotAccess.Sql = "show timeseries " + identifier + "." + groupNames[groupIndex] + "*;"
-		sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
-		if err == nil {
-			lines := printDataSet(sessionDataSet)
-			for ndx, str := range lines { // first 10 lines are column headers, then 3 blank lines between each timeseries.
-				if ndx > (blockSize - 1) {
-					index := ndx % blockSize
-					line := strings.TrimSpace(str)
-					switch index {
-					case 0:
-						timeseriesItem = IotdbTimeseriesProfile{}
-						timeseriesItem.Timeseries = line
-					case 1:
-						timeseriesItem.Alias = line
-					case 2:
-						timeseriesItem.Database = line
-					case 3:
-						timeseriesItem.DataType = line
-					case 4:
-						timeseriesItem.Encoding = line
-					case 5:
-						timeseriesItem.Compression = line
-					case 6:
-						timeseriesItem.Tags = line
-					case 7:
-						timeseriesItem.Attributes = line
-					case 8:
-						timeseriesItem.Deadband = line
-					case 9:
-						timeseriesItem.DeadbandParameters = line
-					case 10:
-						timeseriesList = append(timeseriesList, timeseriesItem)
-					}
-				}
-			}
-			sessionDataSet.Close()
-		} else {
-			checkErr("iotAccess.GetTimeseriesList("+identifier+")", err)
-		}
-	} // for groupIndex
-
-	// format/assign iotAccess.QueryResults
-	const cwidth0 = 100
-	const cwidth1 = 10
-	const sep = "|"
-	iotAccess.QueryResults = make([]string, 0) // skip Alias,Database,Tags|Attributes|Deadband|DeadbandParameters
-	iotAccess.QueryResults = append(iotAccess.QueryResults, "                                     Timeseries |DataType|Encoding|Compress|")
-	for ndx := 0; ndx < len(timeseriesList); ndx++ {
-		item0 := strings.Repeat(" ", cwidth0-len(timeseriesList[ndx].Timeseries)) + timeseriesList[ndx].Timeseries + sep
-		item2 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].DataType)) + timeseriesList[ndx].DataType + sep
-		item3 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].Encoding)) + timeseriesList[ndx].Encoding + sep
-		item4 := strings.Repeat(" ", cwidth1-len(timeseriesList[ndx].Compression)) + timeseriesList[ndx].Compression + sep
-		iotAccess.QueryResults = append(iotAccess.QueryResults, item0+item2+item3+item4)
-	}
-
-	return timeseriesList
-}
-
-func (iotAccess *IoTDbAccess) GetTimeseriesCounts(identifier string) (map[string]int, error) {
-	iotAccess.Sql = "select count(*) from " + identifier + ".**;"
-	sessionDataSet, err := iotAccess.session.ExecuteQueryStatement(iotAccess.Sql, &timeout)
-	countMap := make(map[string]int)
-	keys := make([]string, 0)
-	if err == nil {
-		lines := printDataSet(sessionDataSet)
-		n := 0
-		for true {
-			key := strings.TrimSpace(lines[n])
-			if len(key) < 2 || n >= maxColumns {
-				break
-			}
-			keys = append(keys, key[len("count("):len(key)-1])
-			n++
-		}
-		for m := 0; m < n; m++ {
-			valStr := strings.TrimSpace(lines[n+1+m])
-			val, err := strconv.Atoi(valStr)
-			if err == nil {
-				countMap[keys[m]] = val
-			}
-		}
-
-	}	
-	sessionDataSet.Close()
-	return countMap,nil
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
 type IotdbTimeseriesProfile struct {
 	Timeseries         string `json:"timeseries"`
 	Alias              string `json:"alias"`
@@ -263,6 +155,16 @@ type MeasurementVariable struct {
 	FillValue       string `json:"fillvalue"`
 	Comment         string `json:"comment"`
 	Calendar        string `json:"calendar"`
+}
+
+// Separate struct if we want slice of these in container class. 
+// Keep these field names different from container structs to avoid confusion.
+type IoTDbAccess struct {
+	session            client.Session
+	Sql                string   `json:"sql"`
+	ActiveSession      bool     `json:"activesession"`
+	TimeseriesCommands []string `json:"timeseriescommands"` // given as command-line parameters
+	QueryResults       []string `json:"queryresults"`
 }
 
 // Generic NetCDF container. Not stored in IotDB.
@@ -843,22 +745,6 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + cdf.Identifier + ".*;")
-
-		case "query":
-			deviceIdList := make([]string, len(cdf.HouseIndices))
-			for ndx := 0; ndx < len(cdf.HouseIndices); ndx++ {
-				deviceIdList[ndx] = cdf.HouseIndices[ndx] + "."
-			}
-			/*iotdbTimeseriesList := cdf.GetTimeseriesList(cdf.Identifer+".", deviceIdList)
-			itp := IotdbTimeseriesProfile{}
-			err := filesystem.WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), cdf.DataFilePath+"/"+cdf.DatasetName+".sql", false) //<<<
-			checkErr("WriteTextLines(query)", err)*/
-
-		case "ontology": // serialize saref class file:
-			ttlLines := cdf.Format_Ontology_Interconnect()
-			err := InsertOntologyIntoGraphDB(cdf.Identifier, ttlLines)
-			checkErr("InsertNamedGraphOntology(example)", err)
-
 		}
 		fmt.Println("Timeseries <" + command + "> completed.")
 	} // for
@@ -1364,15 +1250,6 @@ func getExternalReferences() string {
 		`s4auto:Confidence a owl:Class .` + crlf
 }
 
-/*<<<< Read IoTMetadata summary file and Write as time series metadata ontology into GraphDB. 
-For each IoT time series, list the number of given values and missing values per measurement.
-Make the dataset its own Interconnect ontology Class and load into GraphDB as Named Graph. 
-*/
-func InsertOntologyIntoGraphDB(iotIdentifier string, ttlLines []string) error {
-	// namedGraph := (iotIdentifier)
-	return nil
-}
-
 func prettifyString(str string) string {
 	s := strings.TrimSpace(strings.ReplaceAll(str, "\"", ""))
 	if strings.HasSuffix(s, ";") {
@@ -1666,7 +1543,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	return unknown
 }
 
-var timeSeriesCommands = []string{"ontology", "init", "create", "drop", "delete", "insert", "query"}
+var timeSeriesCommands = []string{"init", "create", "drop", "delete", "insert"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
@@ -2158,7 +2035,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
-			fmt.Println(sql)//<<<
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
 			fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*;")
@@ -2212,20 +2088,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
 			}
 			fmt.Println("\nIOTDB TEST QUERY: SELECT COUNT(*) FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ";")
-
-		case "query":
-			iotdbTimeseriesList, err := iot.GetTimeseriesCounts(iot.Identifier) //<<<< []IotdbTimeseriesProfile
-			fmt.Println(len(iotdbTimeseriesList))
-			checkErr("GetTimeseriesCounts", err)
-			/*outputPath := GetOutputPath(iot.DataFilePath, ".sql")
-			itp := IotdbTimeseriesProfile{}
-			err := filesystem.WriteTextLines(itp.Format_Timeseries(iotdbTimeseriesList), outputPath, false) 
-			checkErr("WriteTextLines(query)", err)*/
-
-		case "ontology": // serialize saref class file: 
-			ttlLines := iot.Format_Ontology_Interconnect()
-			err := InsertOntologyIntoGraphDB(iot.Identifier, ttlLines)
-			checkErr("InsertNamedGraphOntology(example)", err)
 		}
 
 		fmt.Println("Timeseries <" + command + "> completed.")
