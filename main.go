@@ -32,13 +32,13 @@ import (
 	"strings"
 	"time"
 	"filesystem" // work module
+	"datetime" // work module
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/fhs/go-netcdf/netcdf"
 )
 
 const ( // these do not include trailing >
 	HomeDirectory          = "/home/david/" // davidgnabasik
-	serializationExtension = ".ttl" //.trig Classic Turtle does not support named graphs -- output in TRiG format. https://en.wikipedia.org/wiki/TriG_(syntax)
 	sparqlExtension        = ".sparql"
 	csvExtension           = ".csv"
 	varExtension           = ".var"
@@ -47,9 +47,9 @@ const ( // these do not include trailing >
 	timeAlias              = "time1"
 	blockSize              = 163840 //=20*8192 	131072=16*8192
 	maxColumns             = 256
-	maxRows                = 256
 	interpolated           = "interpolated"
 	unitsName			   = "units"
+	LastColumnName = "DatasetName"
 )
 
 var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
@@ -305,7 +305,7 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 func formatFloat(str string) float64 {
 	f, err := strconv.ParseFloat(str, 64)
 	if err != nil {
-		return zero
+		return 0.0
 	}
 	return f
 }
@@ -439,7 +439,7 @@ func (cdf *NetCDF) GetColumnNumberFromName(columnName string) int {
 	}
 	return -1
 }
-
+/*
 func (cdf *NetCDF) GetRowNumberFromName(rowName string) int {
 	for ndx := 0; ndx < maxRows; ndx++ { 
 		if strings.ToLower(cdf.Summary[ndx][0]) == strings.ToLower(rowName) {
@@ -458,20 +458,20 @@ func (cdf *NetCDF) GetStartEndDates() (string, string) {
 	unitsColumn := cdf.GetColumnNumberFromName(unitsName)
 
 	if cdf.Summary[0][unitsColumn] == "unixutc" {
-		startTime, err := getStartTimeFromLongint(sDate)
+		startTime, err := datetime.GetStartTimeFromLongint(sDate)
 		if err != nil {
-			sDate = GetDateStr(startTime)
+			sDate = datetime.datetime.GetDateStr(startTime)
 		}
-		endTime, err := getStartTimeFromLongint(eDate)
+		endTime, err := datetime.GetStartTimeFromLongint(eDate)
 		if err != nil {
-			eDate = GetDateStr(endTime)
+			eDate = datetime.datetime.GetDateStr(endTime)
 		}
 	} else {
 		sDate = sDate[0:10]
 		eDate = eDate[0:10]
 	}
 	return sDate, eDate
-}
+} */
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
@@ -581,7 +581,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		for r := startRow; r < endRow; r++ {
 			sb.Reset()
-			startTime, err := getStartTimeFromString(cdf.Dataset[r][timeIndex])
+			startTime, err := datetime.GetStartTimeFromString(cdf.Dataset[r][timeIndex])
 			if err != nil {
 				fmt.Println("Appears to be a bad time: " + cdf.Dataset[r][timeIndex])
 				break
@@ -1175,13 +1175,6 @@ func checkErr(title string, err error) {
 }
 
 // /////////////////////////////////////////////////////////////////////////////////////////
-// ISO 8601 format: use package iso8601 since The built-in RFC3333 time layout in Go is too restrictive to support any ISO8601 date-time.
-const (
-	TimeFormat     = "2006-01-02T15:04:05Z" // yyyy-MM-ddThh:mm:ssZ UTC RFC3339 format. Do not save timezone.
-	TimeFormat1    = "2006-01-02 15:04:05"
-	TimeFormatNano = "2006-01-02T15:04:05.000Z07:00" // this is the preferred milliseconds version.
-	LastColumnName = "DatasetName"
-)
 
 //var formattedUnits = []string{"longtime", "yyyy-MM-ddThh:mm:ssZ", "unicode", "unixutc", meters/hour", "knots", "percent" } "unitless"=>"unicode"
 
@@ -1338,33 +1331,6 @@ func StandardName(oldName string) (string, string) {
 	}
 }
 
-// someTime can be either a long or a readable dateTime string.
-func getStartTimeFromLongint(someTime string) (time.Time, error) {
-	isLong, err := strconv.ParseInt(someTime, 10, 64)
-	if err == nil {
-		return time.Unix(isLong, 0), err
-	}
-	t, err := time.Parse(TimeFormat, someTime)
-	if err != nil {
-		return time.Unix(isLong, 0), err
-	}
-	return t, nil
-}
-
-// Process: 2017-01-18 10:40:00
-func getStartTimeFromString(someTime string) (time.Time, error) {
-	t, err := time.Parse(TimeFormat1, someTime)
-	if err != nil {
-		return t, err
-	}
-	return t, nil
-}
-
-// Return yyyy-MM-dd
-func GetDateStr(t time.Time) string {
-	return t.Format("2006-01-02")
-}
-
 // Return IotDB datatype; encoding; compression. See https://iotdb.apache.org/UserGuide/V1.0.x/Data-Concept/Encoding.html#encoding-methods
 // (client.TSDataType, client.TSEncoding, client.TSCompressionType)  Make all compression SNAPPY
 func getClientStorage(dataColumnType string) (string, string, string) {
@@ -1384,19 +1350,6 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 		return "BOOLEAN", "RLE", "SNAPPY"
 	}
 	return "TEXT", "PLAIN", "SNAPPY"
-}
-
-func StandardDate(dt time.Time) string {
-	var a [20]byte
-	var b = a[:0]                        // Using the a[:0] notation converts the fixed-size array to a slice type represented by b that is backed by this array.
-	b = dt.AppendFormat(b, time.RFC3339) // AppendFormat() accepts type []byte. The allocated memory a is passed to AppendFormat().
-	return string(b[0:10])
-}
-
-func GetUniqueInstanceID() string {
-	dateTime := StandardDate(time.Now())
-	dateTime = strings.ReplaceAll(dateTime, "-", "")
-	return `_` + dateTime
 }
 
 type IoTDbProgramParameters struct {
@@ -1568,40 +1521,6 @@ func (iot *IoTDbCsvDataFile) GetColumnNumberFromName(columnName string) int {
 	return -1
 }
 
-func (iot *IoTDbCsvDataFile) GetRowNumberFromName(rowName string) int {
-	for ndx := 0; ndx < maxRows; ndx++ { 
-		//dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0])
-		if strings.ToLower(iot.Summary[ndx][0]) == strings.ToLower(rowName) {
-			return ndx
-		}
-	}
-	return -1
-}
-
-// Reconcile various timestamp formats. Return xsd:date format (yyyy-MM-dd)  D2 & E2
-// TimeMeasurementName: {opsd.household:2:units=yyyy-MM-ddThh:mm:ssZ	HomeC:2:units=unixutc	ton.iot:2:units=unixutc}
-func (iot *IoTDbCsvDataFile) GetStartEndDates() (string, string) {
-	timeRow := iot.GetRowNumberFromName(iot.TimeMeasurementName)  // 1
-	sDate := iot.Summary[timeRow][3]	// const
-	eDate := iot.Summary[timeRow][4]
-	unitsColumn := iot.GetColumnNumberFromName(unitsName)
-
-	if iot.Summary[0][unitsColumn] == "unixutc" {
-		startTime, err := getStartTimeFromLongint(sDate)
-		if err != nil {
-			sDate = GetDateStr(startTime)
-		}
-		endTime, err := getStartTimeFromLongint(eDate)
-		if err != nil {
-			eDate = GetDateStr(endTime)
-		}
-	} else {
-		sDate = sDate[0:10]
-		eDate = eDate[0:10]
-	}
-	return sDate, eDate
-}
-
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
@@ -1751,7 +1670,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime, err := getStartTimeFromLongint(iot.Dataset[r][timeIndex])
+					startTime, err := datetime.GetStartTimeFromLongint(iot.Dataset[r][timeIndex])
 					if err != nil {
 						fmt.Println(iot.Dataset[r][timeIndex])
 						break
