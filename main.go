@@ -1,4 +1,4 @@
-package main	// this program inserts data into IotDB.
+package netcdf // main // this program inserts data into IotDB.
 // Getting started with Golang multi-module workspaces: https://go.dev/doc/tutorial/workspaces
 // Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
 // Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
@@ -22,6 +22,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"errors"
+	"filesystem" // work module
 	"flag"
 	"fmt"
 	"log"
@@ -30,33 +31,32 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
-	"filesystem" // work module
-	"datetime" // work module
+
 	"github.com/apache/iotdb-client-go/client"
 	"github.com/fhs/go-netcdf/netcdf"
 )
 
 const ( // these do not include trailing >
-	HomeDirectory          = "/home/david/" // davidgnabasik
-	sparqlExtension        = ".sparql"
-	csvExtension           = ".csv"
-	varExtension           = ".var"
-	ncExtension            = ".nc"
-	crlf                   = "\n"
-	timeAlias              = "time1"
-	blockSize              = 163840 //=20*8192 	131072=16*8192
-	maxColumns             = 256
-	interpolated           = "interpolated"
-	unitsName			   = "units"
-	LastColumnName = "DatasetName"
+	HomeDirectory   = "/home/david/" // davidgnabasik
+	sparqlExtension = ".sparql"
+	csvExtension    = ".csv"
+	varExtension    = ".var"
+	ncExtension     = ".nc"
+	crlf            = "\n"
+	timeAlias       = "time1"
+	blockSize       = 163840 //=20*8192 	131072=16*8192
+	maxColumns      = 256
+	interpolated    = "interpolated"
+	unitsName       = "units"
+	LastColumnName  = "DatasetName"
 )
 
-var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
+// var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
-var timeout int64 = 1000
+
+//var timeout int64 = 1000
 
 func GetSummaryFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
@@ -152,7 +152,7 @@ type MeasurementVariable struct {
 	Calendar        string `json:"calendar"`
 }
 
-// Separate struct if we want slice of these in container class. 
+// Separate struct if we want slice of these in container class.
 // Keep these field names different from container structs to avoid confusion.
 type IoTDbAccess struct {
 	session            client.Session
@@ -177,7 +177,7 @@ type NetCDF struct {
 	Datastream_name     string                          `json:"datastream_name"`
 	Input_files         string                          `json:"input_files"`
 	History             string                          `json:"history"`
-	TimeMeasurementName string                          `json:"timemeasurementname"` // index into Measurements map; 
+	TimeMeasurementName string                          `json:"timemeasurementname"` // index into Measurements map;
 	Measurements        map[string]*MeasurementVariable `json:"measurements"`
 	HouseIndices        []string                        `json:"houseindices"`    // these unique 2 indices are specific to Ecobee datasets.
 	LongtimeIndices     []string                        `json:"longtimeindices"` // Different months will have slightly different HouseIndices!
@@ -271,7 +271,7 @@ func (cdf NetCDF) GetMeasurementVariableFromName(name string) (MeasurementVariab
 	}
 	// check alias names
 	for _, item := range cdf.Measurements {
-		if strings.ToLower(name) == strings.ToLower(item.MeasurementAlias) || strings.ToLower(name) == strings.ToLower(item.MeasurementItem.MeasurementName) {
+		if strings.EqualFold(name, item.MeasurementAlias) || strings.EqualFold(name, item.MeasurementItem.MeasurementName) {
 			return *item, true
 		}
 	}
@@ -302,13 +302,13 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	return stats, true
 }
 
-func formatFloat(str string) float64 {
+/*func formatFloat(str string) float64 {
 	f, err := strconv.ParseFloat(str, 64)
 	if err != nil {
 		return 0.0
 	}
 	return f
-}
+}*/
 
 /* Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
 // Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
@@ -431,17 +431,18 @@ func (cdf *NetCDF) GetMeasurementItemFromName(name string) (*MeasurementVariable
 	return item, false
 }
 
-func (cdf *NetCDF) GetColumnNumberFromName(columnName string) int { 
+func (cdf *NetCDF) GetColumnNumberFromName(columnName string) int {
 	for ndx := 0; ndx < len(cdf.Summary[0]); ndx++ { // iterate over summary header row
-		if strings.ToLower(cdf.Summary[0][ndx]) == strings.ToLower(columnName) {
+		if strings.EqualFold(cdf.Summary[0][ndx], columnName) {
 			return ndx
 		}
 	}
 	return -1
 }
+
 /*
 func (cdf *NetCDF) GetRowNumberFromName(rowName string) int {
-	for ndx := 0; ndx < maxRows; ndx++ { 
+	for ndx := 0; ndx < maxRows; ndx++ {
 		if strings.ToLower(cdf.Summary[ndx][0]) == strings.ToLower(rowName) {
 			return ndx
 		}
@@ -458,13 +459,13 @@ func (cdf *NetCDF) GetStartEndDates() (string, string) {
 	unitsColumn := cdf.GetColumnNumberFromName(unitsName)
 
 	if cdf.Summary[0][unitsColumn] == "unixutc" {
-		startTime, err := datetime.GetStartTimeFromLongint(sDate)
+		startTime, err := filesystem.GetStartTimeFromLongint(sDate)
 		if err != nil {
-			sDate = datetime.datetime.GetDateStr(startTime)
+			sDate = filesystem.GetDateStr(startTime)
 		}
-		endTime, err := datetime.GetStartTimeFromLongint(eDate)
+		endTime, err := filesystem.GetStartTimeFromLongint(eDate)
 		if err != nil {
-			eDate = datetime.datetime.GetDateStr(endTime)
+			eDate = filesystem.GetDateStr(endTime)
 		}
 	} else {
 		sDate = sDate[0:10]
@@ -581,7 +582,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		for r := startRow; r < endRow; r++ {
 			sb.Reset()
-			startTime, err := datetime.GetStartTimeFromString(cdf.Dataset[r][timeIndex])
+			startTime, err := filesystem.GetStartTimeFromString(cdf.Dataset[r][timeIndex])
 			if err != nil {
 				fmt.Println("Appears to be a bad time: " + cdf.Dataset[r][timeIndex])
 				break
@@ -685,7 +686,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 	for _, command := range cdf.TimeseriesCommands {
 		switch command {
-		case "init": 
+		case "init":
 			sql := "CREATE DATABASE " + cdf.Identifier
 			_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
@@ -898,7 +899,7 @@ func ParseVariableFile(varFile, filetype, dataSetIdentifier, description string,
 
 	lineIndex = lineIndex + 2
 	xcdf.HouseIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["id"], lineIndex, lines)
-	xcdf.LongtimeIndices, lineIndex = parseDimensionIndices(xcdf.Dimensions["time"], lineIndex, lines)
+	xcdf.LongtimeIndices, _ = parseDimensionIndices(xcdf.Dimensions["time"], lineIndex, lines)
 	return xcdf, nil
 }
 
@@ -1114,13 +1115,13 @@ func ProcessNcSensorData(programArgs []string) {
 }
 
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
-func main() {
+/*<<<< func main() {
 	//fmt.Println(ShowLastExternalBackup())
 	sourceDataType := "help"
 	if len(os.Args) > 1 {
 		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
 	}
-	
+
 	switch sourceDataType {
 	case ".csv":
 		ProcessCsvSensorData(os.Args)
@@ -1134,7 +1135,7 @@ func main() {
 		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
 		os.Exit(0)
 	}
-}
+}*/
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1185,26 +1186,26 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
 	const varPrefix = "https://energyknowledgebase.com/topics/volt-ampere-reactive-var.asp"
 	var unitsOfMeasure = map[string]string{
-		"kW":     uomPrefix + "kilowatt",
-		"kWh":    uomPrefix + "kilowattHour",
-		"pascal": uomPrefix + "pascal",
-		"kelvin": uomPrefix + "kelvin",
-		"°C":     uomPrefix + "degreeCelsius",
-		"°F":     uomPrefix + "degreeFahrenheit",
-		"%rh":    uomPrefix + "PercentRelativeHumidity",
-		"mb":     uomPrefix + "millibar",
-		"degree": uomPrefix + "degree",
-		"lux":    uomPrefix + "lux",
-		"km":     uomPrefix + "kilometre",
-		"dV":	  uomPrefix + "decivolt",
-		"dA":	  uomPrefix + "deciampere",
-		"Hz":	  uomPrefix + "hertz",
-		"DPF":	  "https://ctlsys.com/support/power_factor/",
-		"APF":	  "https://ctlsys.com/support/power_factor/",
-		"VAR":	  varPrefix,
-		"VAR.hour":	varPrefix,
-		"VA"	  : "https://en.wikipedia.org/wiki/Volt-ampere",
-		"VA.hour" : "https://en.wikipedia.org/wiki/Volt-ampere",
+		"kW":       uomPrefix + "kilowatt",
+		"kWh":      uomPrefix + "kilowattHour",
+		"pascal":   uomPrefix + "pascal",
+		"kelvin":   uomPrefix + "kelvin",
+		"°C":       uomPrefix + "degreeCelsius",
+		"°F":       uomPrefix + "degreeFahrenheit",
+		"%rh":      uomPrefix + "PercentRelativeHumidity",
+		"mb":       uomPrefix + "millibar",
+		"degree":   uomPrefix + "degree",
+		"lux":      uomPrefix + "lux",
+		"km":       uomPrefix + "kilometre",
+		"dV":       uomPrefix + "decivolt",
+		"dA":       uomPrefix + "deciampere",
+		"Hz":       uomPrefix + "hertz",
+		"DPF":      "https://ctlsys.com/support/power_factor/",
+		"APF":      "https://ctlsys.com/support/power_factor/",
+		"VAR":      varPrefix,
+		"VAR.hour": varPrefix,
+		"VA":       "https://en.wikipedia.org/wiki/Volt-ampere",
+		"VA.hour":  "https://en.wikipedia.org/wiki/Volt-ampere",
 	}
 
 	switch uom {
@@ -1403,7 +1404,7 @@ func Init_IoTDB(testIotdbAccess bool) (string, bool) {
 
 type IoTDbCsvDataFile struct {
 	IoTDbAccess
-	Identifier          string                      `json:"identifier"` 
+	Identifier          string                      `json:"identifier"`
 	Description         string                      `json:"description"`
 	DataFilePath        string                      `json:"datafilepath"`
 	DataFileType        string                      `json:"datafiletype"`
@@ -1414,7 +1415,7 @@ type IoTDbCsvDataFile struct {
 	Dataset             [][]string                  `json:"dataset"` // actual data
 }
 
-// expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath. 
+// expect only 1 instance of 'datasetName' in iotdbDataFile.DataFilePath.
 func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvDataFile, error) {
 	datasetName := filepath.Base(programArgs[1]) // includes extension
 	datasetName = strings.Replace(datasetName, csvExtension, "", 1)
@@ -1426,7 +1427,7 @@ func Initialize_IoTDbCsvDataFile(isActive bool, programArgs []string) (IoTDbCsvD
 	err := iotdbDataFile.ReadCsvFile(GetSummaryFilename(iotdbDataFile.DataFilePath), false) // isDataset: no, is summary  REFACTOR: read from GraphDB?
 	checkErr("ReadCsvFile ", err)
 	iotdbDataFile.XsvSummaryTypeMap()
-	_,readDataFile := find(programArgs, "insert") 
+	_, readDataFile := find(programArgs, "insert")
 	if readDataFile > 1 {
 		err = iotdbDataFile.ReadCsvFile(iotdbDataFile.DataFilePath, true) // isDataset: yes
 		checkErr("ReadCsvFile ", err)
@@ -1537,7 +1538,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 			break
 		}
 		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // dataColumnName is normalized for IotDB naming conventions.
-		ignore := iot.Summary[ndx+1][0] == "time" || iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][4] == "0"
+		ignore := iot.Summary[ndx+1][0] == "time" || iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][3] == "0" && iot.Summary[ndx+1][4] == "0"
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
@@ -1611,7 +1612,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
-			case "init": 
+		case "init":
 			sql := "CREATE DATABASE " + iot.Identifier
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
@@ -1670,7 +1671,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime, err := datetime.GetStartTimeFromLongint(iot.Dataset[r][timeIndex])
+					startTime, err := filesystem.GetStartTimeFromLongint(iot.Dataset[r][timeIndex])
 					if err != nil {
 						fmt.Println(iot.Dataset[r][timeIndex])
 						break
@@ -1701,7 +1702,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 	return nil
 }
 
-func printDataSet(sds *client.SessionDataSet) []string {
+/*func printDataSet(sds *client.SessionDataSet) []string {
 	const tab = "\t"
 	output := make([]string, 0)
 	showTimestamp := !sds.IsIgnoreTimeStamp()
@@ -1729,7 +1730,7 @@ func printDataSet(sds *client.SessionDataSet) []string {
 		output = append(output, crlf)
 	}
 	return output
-}
+}*/
 
 /*
 type AutoGenerated struct {
