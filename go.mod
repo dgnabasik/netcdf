@@ -1,6 +1,6 @@
 module netcdf
 
-go 1.20
+go 1.21
 
 require (
 	github.com/apache/iotdb-client-go v1.1.7
