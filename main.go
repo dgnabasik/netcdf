@@ -1,4 +1,4 @@
-package netcdf // main // this program inserts data into IotDB.
+package main // netcdf inserts data into IotDB.
 // Getting started with Golang multi-module workspaces: https://go.dev/doc/tutorial/workspaces
 // Define TimeseriesDataset as a queryable set of zero or more sequences of Timeseries measurements.
 // Define TimeseriesDataStream as a sequence of measurements all with the same type of unit collected at periodic intervals but may include missing values.
@@ -302,83 +302,6 @@ func (cdf NetCDF) GetSummaryStatValues(columnName string) ([]string, bool) {
 	return stats, true
 }
 
-/*func formatFloat(str string) float64 {
-	f, err := strconv.ParseFloat(str, 64)
-	if err != nil {
-		return 0.0
-	}
-	return f
-}*/
-
-/* Make the dataset its own Class and loadable into GraphDB. Produce specific DatatypeProperty ontology from dataset. Special handling: "dateTime", "XMLLiteral", "anyURI".
-// Formatted numeric strings may have one of two forms: decimal notation (no exponent) or scientific notation (“E” notation).
-func (cdf NetCDF) Format_Ontology_Interconnect() []string {
-	startDate, endDate := cdf.GetStartEndDates()
-	baseline := GetBaselineOntology(cdf.Identifier, cdf.Title, cdf.Description, startDate, endDate)
-	output := strings.Split(baseline, crlf)
-	output = append(output, `### specific time series DatatypeProperties`)
-	ndx := 0
-	for _, v := range cdf.Measurements {
-		str := `[ rdf:type owl:Restriction ;` + crlf + `owl:onProperty ` + s4data + `has` + v.MeasurementItem.MeasurementAlias + ` ;` + crlf + `owl:allValuesFrom xsd:` + xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)] + crlf
-		if ndx < len(cdf.Measurements) {
-			str += `] ,`
-		} else {
-			str += `] ;`
-		}
-		ndx++
-		output = append(output, str)
-	}
-
-	output = append(output, ` rdfs:comment "`+cdf.Description+`"@en ;`)
-	output = append(output, ` rdfs:label "`+cdf.Identifier+`"@en .`)
-
-	// append single NamedIndividual.
-	output = append(output, `### externel references`+crlf)
-	externStr := getExternalReferences()
-	output = append(output, strings.Split(externStr, crlf)...)
-
-	// new common Classes: StartTimeseries, StopTimeseries
-	uniqueID := GetUniqueInstanceID()
-	output = append(output, `### class instances`+crlf)
-	output = append(output, `ex:StartTimeseries`+uniqueID)
-	output = append(output, `rdf:type `+s4data+`StartTimeseries ;`)
-	output = append(output, `rdf:label "StartTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `ex:StopTimeseries`+uniqueID)
-	output = append(output, `rdf:type `+s4data+`StopTimeseries ;`)
-	output = append(output, `rdf:label "StopTimeseries`+uniqueID+`"^^xsd:string .`+crlf)
-	output = append(output, `### internal references`+crlf)
-
-	values, ok := cdf.GetSummaryStatValues("mean")
-	output = append(output, `<`+DataSetPrefix+cdf.Identifier+uniqueID+`> rdf:type owl:NamedIndividual , `)
-	output = append(output, `  saref:Measurement , saref:Time , saref:UnitOfMeasure , s4envi:FrequencyUnit , s4envi:FrequencyMeasurement ;`+crlf)
-
-	if ok {
-		for ndx := 0; ndx < len(cdf.Measurements); ndx++ {
-			for _, v := range cdf.Measurements { //
-				if v.ColumnOrder == ndx && !v.Ignore {
-					xsd := xsdDatatypeMap[strings.ToLower(v.MeasurementItem.MeasurementType)]
-					if len(xsd) < 1 {
-						fmt.Println("  invalid type: " + v.MeasurementItem.MeasurementType)
-					}
-					if xsd == "decimal" && strings.Contains(strings.ToLower(values[ndx]), "e") { // remove Exponent
-						values[ndx] = fmt.Sprintf("%.14f", formatFloat(values[ndx]))
-					}
-					str := s4data + v.MeasurementAlias + ` "` + values[ndx] + `"^^xsd:` + xsd
-					if v.ColumnOrder < len(cdf.Measurements)-1 {
-						str += ` ;`
-					} else { // DatasetName
-						str = s4data + v.MeasurementAlias + ` "` + cdf.DatasetName + `"^^xsd:` + xsd + ` .`
-					}
-					output = append(output, str)
-					break
-				}
-			}
-		}
-	}
-	output = append(output, "")
-	return output
-} */
-
 // Expects comma-separated files. Assigns Dataset or Summary.
 func (cdf *NetCDF) ReadCsvFile(filePath string, isDataset bool) error {
 	f, err := os.Open(filePath)
@@ -485,11 +408,11 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	dimMap := cdf.getDimensionMap()
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
 		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // NOTE!! does not include cdf.Summary[ndx+1][0] == "time" ||
-		ignore := cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0"
+		ignore := (cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0") || dataColumnName == interpolated
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		endOfMeasurements := cdf.Summary[ndx+1][0] == interpolated || len(cdf.Summary[ndx+1][0]) < 2
+		endOfMeasurements := cdf.Summary[ndx+1][0] == interpolated || len(strings.TrimSpace(cdf.Summary[ndx+1][0])) < 2
 		if endOfMeasurements {
 			cdf.Identifier = cdf.Summary[ndx+1][1]
 			ndx1 = ndx
@@ -1056,6 +979,7 @@ func GetOutputPath(filePath, ext string) string {
 
 func CreateIotSession(programArgs []string) bool {
 	createIotSession := !(len(programArgs) == 3 && programArgs[2] == timeSeriesCommands[0])
+	fmt.Println("createIotSession")
 	if createIotSession {
 		iotdbConnection, ok := Init_IoTDB(createIotSession)
 		if !ok {
@@ -1115,7 +1039,7 @@ func ProcessNcSensorData(programArgs []string) {
 }
 
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
-/*<<<< func main() {
+func main() {
 	//fmt.Println(ShowLastExternalBackup())
 	sourceDataType := "help"
 	if len(os.Args) > 1 {
@@ -1129,13 +1053,13 @@ func ProcessNcSensorData(programArgs []string) {
 		ProcessNcSensorData(os.Args)
 	//case ".hd5":
 	default:
-		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT and Graph databases.")
+		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
 		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
 		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
 		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
 		os.Exit(0)
 	}
-}*/
+}
 
 ///////////////////////////////////////////////////////////////////////////////////////////
 
@@ -1307,7 +1231,7 @@ func formatDataItem(s, dataType string) string {
 		if len(s) == 0 {
 			return "null"
 		} else {
-			return s
+			return s  // float
 		}
 	}
 }
@@ -1531,18 +1455,18 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 	unitsColumn := iot.GetColumnNumberFromName(unitsName)
 	ndx1 := 0
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
-		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || len(iot.Summary[ndx+1][0]) < 2
+		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || len(strings.TrimSpace(iot.Summary[ndx+1][0])) < 2
 		if endOfMeasurements {
 			iot.Identifier = iot.Summary[ndx+1][1]
 			ndx1 = ndx
 			break
 		}
 		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // dataColumnName is normalized for IotDB naming conventions.
-		ignore := iot.Summary[ndx+1][0] == "time" || iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][3] == "0" && iot.Summary[ndx+1][4] == "0"
+		ignore := iot.Summary[ndx+1][0] == "time" || (iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][3] == "0" && iot.Summary[ndx+1][4] == "0") || dataColumnName == interpolated
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == interpolated || len(iot.Summary[ndx+1][0]) < 2
+		theEnd := dataColumnName == interpolated || len(strings.TrimSpace(iot.Summary[ndx+1][0])) < 2
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  aliasName, // the CSV field names are often unusable.
@@ -1643,6 +1567,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
+			fmt.Println(sql)
 			fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*;")
 
 		case "delete": // remove all data; retain schema; multiple commands.
@@ -1659,8 +1584,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			nBlocks := len(iot.Dataset)/(blockSize) + 1
 			fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
 			for block := 0; block < nBlocks; block++ {
-				fmt.Print(block + 1)
-				fmt.Print(" ") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
+				//fmt.Print(block + 1)
+				fmt.Print(".") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				var sb strings.Builder
 				var insert strings.Builder
 				insert.WriteString("INSERT INTO " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " (time, " + iot.FormattedColumnNames() + ") ALIGNED VALUES ")

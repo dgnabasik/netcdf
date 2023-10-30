@@ -1,5 +1,4 @@
 go build
 read -p "the program built."
-./netcdf Jan_clean netCDF-4 root.datasets.etsi.Ecobee_clean_5min
-
+./netcdf /home/david/Documents/digital-twins/opsd.household/1min_singleindex.csv insert
 
