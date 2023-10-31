@@ -42,7 +42,8 @@ const ( // these do not include trailing >
 	csvExtension    = ".csv"
 	varExtension    = ".var"
 	ncExtension     = ".nc"
-	crlf            = "\n"
+	crlf            = "\n"	
+	endOfFields	 	= "\\"
 	timeAlias       = "time1"
 	blockSize       = 163840 //=20*8192 	131072=16*8192
 	maxColumns      = 256
@@ -55,8 +56,7 @@ const ( // these do not include trailing >
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
 var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
-
-//var timeout int64 = 1000
+var rowsXsdMap = map[string]string{"Unicode": "string", "unicode": "string", "Float": "float", "float": "float", "Integer": "integer", "integer": "integer", "Longint": "int64", "longint": "int64", "Double": "double", "double": "double"}
 
 func GetSummaryFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
@@ -400,7 +400,6 @@ func (cdf *NetCDF) GetStartEndDates() (string, string) {
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (cdf *NetCDF) XsvSummaryTypeMap() {
-	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "int64", "Double": "double"}
 	cdf.Measurements = make(map[string]*MeasurementVariable, 0)
 	// get units column
 	unitsColumn := cdf.GetColumnNumberFromName(unitsName)
@@ -412,7 +411,7 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		endOfMeasurements := cdf.Summary[ndx+1][0] == interpolated || len(strings.TrimSpace(cdf.Summary[ndx+1][0])) < 2
+		endOfMeasurements := cdf.Summary[ndx+1][0] == interpolated || strings.TrimSpace(cdf.Summary[ndx+1][0]) == endOfFields
 		if endOfMeasurements {
 			cdf.Identifier = cdf.Summary[ndx+1][1]
 			ndx1 = ndx
@@ -566,7 +565,7 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 					err := vr.ReadFloat64s(data)
 					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
 				case "unicode", "string":
-					fmt.Println(vr.Name()) //<<<
+					fmt.Println(vr.Name()) 
 					//data := make([]string, datasetSize)
 					//err := vr.ReadBytes(data)
 					//checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
@@ -639,7 +638,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 					for _, v := range cdf.Measurements {
 						if v.ColumnOrder == ndx && !v.Ignore {
 							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
-							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
+							attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')" 
+							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",")
 						}
 					}
 				}
@@ -1055,7 +1055,7 @@ func main() {
 	default:
 		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
 		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
-		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
+		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
 		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
 		os.Exit(0)
 	}
@@ -1449,13 +1449,12 @@ func (iot *IoTDbCsvDataFile) GetColumnNumberFromName(columnName string) int {
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
 func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
-	rowsXsdMap := map[string]string{"Unicode": "string", "Float": "float", "Integer": "integer", "Longint": "longint", "Double": "double"}
 	iot.Measurements = make(map[string]*MeasurementItem, 0)
 	// get units column
 	unitsColumn := iot.GetColumnNumberFromName(unitsName)
 	ndx1 := 0
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
-		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || len(strings.TrimSpace(iot.Summary[ndx+1][0])) < 2
+		endOfMeasurements := iot.Summary[ndx+1][0] == interpolated || strings.TrimSpace(iot.Summary[ndx+1][0]) == endOfFields
 		if endOfMeasurements {
 			iot.Identifier = iot.Summary[ndx+1][1]
 			ndx1 = ndx
@@ -1466,7 +1465,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == interpolated || len(strings.TrimSpace(iot.Summary[ndx+1][0])) < 2
+		theEnd := dataColumnName == interpolated || strings.TrimSpace(iot.Summary[ndx+1][0]) == endOfFields 
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  aliasName, // the CSV field names are often unusable.
@@ -1523,7 +1522,7 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
 // create time series root.datasets.etsi.household_data_60min_singleindex.DE_KN_industrial1_grid_import with datatype=FLOAT, encoding=GORILLA, compressor=SNAPPY;
-// ProcessTimeseries() is the only place where iot.IoTDbAccess.session is instantiated and clientConfig is used.
+// ProcessTimeseries is the only place where iot.IoTDbAccess.session is instantiated and clientConfig is used.
 func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 	if iot.IoTDbAccess.ActiveSession {
 		iot.IoTDbAccess.session = client.NewSession(clientConfig)
@@ -1560,14 +1559,14 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				for _, item := range iot.Measurements {
 					if item.ColumnOrder == ndx && !item.Ignore {
 						dataType, encoding, compressor := getClientStorage(item.MeasurementType)
-						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")
+						attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')" 
+						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",")
 					}
 				}
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
-			fmt.Println(sql)
 			fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*;")
 
 		case "delete": // remove all data; retain schema; multiple commands.
