@@ -44,19 +44,51 @@ const ( // these do not include trailing >
 	ncExtension     = ".nc"
 	crlf            = "\n"	
 	endOfFields	 	= "\\"
-	timeAlias       = "time1"
-	blockSize       = 163840 //=20*8192 	131072=16*8192
-	maxColumns      = 256
+	timeAlias       = "Time1"
+	maxColumns      = 512
 	interpolated    = "interpolated"
 	unitsName       = "units"
 	LastColumnName  = "DatasetName"
+	unknown        = "???"
+	zero           = 0.0
+	graphDbPrefix  = "PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0A"
+	graphDbPostfix = "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%208%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A"
 )
 
+// Non-generic version looks for first embedded string match. Return empty string if not found.
+func find(lines []string, target string) (string, int) {
+	for ndx, v := range lines {
+		if strings.Contains(v, target) {
+			return lines[ndx], ndx
+		}
+	}
+	return "", -1
+}
+
+// abort
+func checkErr(title string, err error) {
+	if err != nil {
+		fmt.Print(title + ": ")
+		fmt.Println(err)
+		log.Fatal(err)
+	}
+}
+
 // var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
+//var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
+//var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
-var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
-var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
-var rowsXsdMap = map[string]string{"Unicode": "string", "unicode": "string", "Float": "float", "float": "float", "Integer": "integer", "integer": "integer", "Longint": "int64", "longint": "int64", "Double": "double", "double": "double"}
+var rowsXsdMap = map[string]string{"dateTime": "datetime", "Unicode": "string", "unicode": "string", "Float": "float", "float": "float", "Integer": "integer", "integer": "integer", "Longint": "int64", "longint": "int64", "Double": "double", "double": "double"}
+
+func getBlockSize(nMeasurements int) int {
+	if nMeasurements < 256 {
+		return 163840 //=20*8192 	131072=16*8192
+	}
+	if nMeasurements < 512 {
+		return 4*8192
+	}
+	return 8192
+}
 
 func GetSummaryFilename(dataFilePath string) string {
 	fileName := filepath.Base(dataFilePath)
@@ -81,8 +113,6 @@ func MakeEntityCleanData(rows int, vars []MeasurementVariable) EntityCleanData {
 	return ecd
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////
-
 type IotdbTimeseriesProfile struct {
 	Timeseries         string `json:"timeseries"`
 	Alias              string `json:"alias"`
@@ -105,8 +135,6 @@ func (itp IotdbTimeseriesProfile) Format_Timeseries(list []IotdbTimeseriesProfil
 	return output
 }
 
-///////////////////////////////////////////////////////////////////////////////////////////
-
 func GetTimeseriesCommands(programArgs []string) []string {
 	timeseriesCommands := make([]string, 0)
 	for ndx := range programArgs {
@@ -122,8 +150,6 @@ func GetTimeseriesCommands(programArgs []string) []string {
 func IotDatasetPrefix(identifier, device string) string {
 	return identifier + "." + device
 }
-
-///////////////////////////////////////////////////////////////////////////////////////////
 
 // mapped to original column name
 type MeasurementItem struct {
@@ -466,7 +492,7 @@ func (cdf *NetCDF) NormalizeValues() {
 	for ndx1 := 0; ndx1 < len(cdf.Dataset[0]); ndx1++ { // number of columns
 		for ndx2 := 1; ndx2 < len(cdf.Dataset); ndx2++ { // number of rows
 			fval, err := strconv.ParseFloat(cdf.Dataset[ndx2][ndx1], 64)
-			if err == nil && fval < minimum {
+			if err == nil && fval < minimum {  
 				cdf.Dataset[ndx2][ndx1] = "0"
 				changed++
 			}
@@ -564,8 +590,8 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 					data := make([]float64, datasetSize)
 					err := vr.ReadFloat64s(data)
 					checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
-				case "unicode", "string":
-					fmt.Println(vr.Name()) 
+				case "unicode", "string", "datetime":
+					fmt.Println(vr.Name()) //<<<
 					//data := make([]string, datasetSize)
 					//err := vr.ReadBytes(data)
 					//checkErr(iotPrefix+item.MeasurementAlias+createMsg, err)
@@ -608,13 +634,13 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 
 	for _, command := range cdf.TimeseriesCommands {
 		switch command {
-		case "init":
+		case "createdb":
 			sql := "CREATE DATABASE " + cdf.Identifier
 			_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
 			fmt.Println(sql)
 
-		case "drop": // time series schema; uses single statement;
+		case "dropts": // time series schema; uses single statement;
 			for id := 0; id < len(cdf.HouseIndices); id++ {
 				sql := "DROP TIMESERIES " + IotDatasetPrefix(cdf.Identifier, cdf.HouseIndices[id]) + "*"
 				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
@@ -624,7 +650,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 				delete(cdf.Measurements, k)
 			}
 
-		case "create":
+		case "createts":
 			// create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.etsidata.household_data_1min_singleindex.<id> (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
 			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
@@ -638,8 +664,9 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 					for _, v := range cdf.Measurements {
 						if v.ColumnOrder == ndx && !v.Ignore {
 							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
-							attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')" 
-							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",")
+							// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
+							//attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
+							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes + 
 						}
 					}
 				}
@@ -1038,71 +1065,6 @@ func ProcessNcSensorData(programArgs []string) {
 	checkErr("ProcessTimeseries(nc)", err)
 }
 
-// Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
-func main() {
-	//fmt.Println(ShowLastExternalBackup())
-	sourceDataType := "help"
-	if len(os.Args) > 1 {
-		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
-	}
-
-	switch sourceDataType {
-	case ".csv":
-		ProcessCsvSensorData(os.Args)
-	case ".nc": // this reads the var file too.
-		ProcessNcSensorData(os.Args)
-	//case ".hd5":
-	default:
-		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
-		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
-		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
-		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
-		os.Exit(0)
-	}
-}
-
-///////////////////////////////////////////////////////////////////////////////////////////
-
-const (
-	unknown        = "???"
-	zero           = 0.0
-	graphDbPrefix  = "PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0A"
-	graphDbPostfix = "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%208%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A"
-)
-
-// generic array search version
-func Find[A any](items []A, predicate func(A) bool) (value A, found bool) {
-	for _, v := range items {
-		if predicate(v) {
-			return v, true
-		}
-	}
-	return
-}
-
-// Non-generic version looks for first embedded string match. Return empty string if not found.
-func find(lines []string, target string) (string, int) {
-	for ndx, v := range lines {
-		if strings.Contains(v, target) {
-			return lines[ndx], ndx
-		}
-	}
-	return "", -1
-}
-
-// abort
-func checkErr(title string, err error) {
-	if err != nil {
-		fmt.Print(title + ": ")
-		fmt.Println(err)
-		log.Fatal(err)
-	}
-}
-
-// /////////////////////////////////////////////////////////////////////////////////////////
-
-//var formattedUnits = []string{"longtime", "yyyy-MM-ddThh:mm:ssZ", "unicode", "unixutc", meters/hour", "knots", "percent" } "unitless"=>"unicode"
-
 // Return a NamedIndividual unit_of_measure from an abreviated key. All of these are specified at the uomPrefix URI.
 // This expects you to manually add the map keys to the (last) Units column header in every *.var file.
 // REFACTOR to get from website?
@@ -1214,7 +1176,7 @@ func GetNamedIndividualUnitMeasure(uom string) string {
 	return unknown
 }
 
-var timeSeriesCommands = []string{"init", "create", "drop", "delete", "insert"}
+var timeSeriesCommands = []string{"createdb", "createts", "dropts", "delete", "insert"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
 
@@ -1224,7 +1186,8 @@ var summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_len
 // Replace embedded quote marks with backticks; return enclosed string.
 // Could format floats to constant width,precision. This function is called millions of times.
 func formatDataItem(s, dataType string) string {
-	if dataType == "string" {
+	dt := strings.ToLower(dataType)
+	if dt == "string" || dt == "unicode" || dt == "datetime" {
 		ss := strings.ReplaceAll(strings.ReplaceAll(s, "\"", "`"), "'", "`")
 		return "'" + ss + "'"
 	} else {
@@ -1263,7 +1226,7 @@ func getClientStorage(dataColumnType string) (string, string, string) {
 	switch sw {
 	case "decimal", "double":
 		return "DOUBLE", "GORILLA", "SNAPPY"
-	case "unicode", "string":
+	case "unicode", "string", "datetime":
 		return "TEXT", "PLAIN", "SNAPPY"
 	case "integer", "int", "int32":
 		return "INT32", "GORILLA", "SNAPPY"
@@ -1535,13 +1498,13 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 
 	for _, command := range iot.TimeseriesCommands {
 		switch command {
-		case "init":
+		case "createdb":
 			sql := "CREATE DATABASE " + iot.Identifier
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
 			fmt.Println(sql)
 
-		case "drop": // time series schema; uses single statement;
+		case "dropts": // time series schema; uses single statement;
 			sql := "DROP TIMESERIES " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*"
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
@@ -1549,7 +1512,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				delete(iot.Measurements, k)
 			}
 
-		case "create":
+		case "createts":
 			// create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.etsidata.device.household_data_1min_singleindex (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
 			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
@@ -1559,12 +1522,14 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				for _, item := range iot.Measurements {
 					if item.ColumnOrder == ndx && !item.Ignore {
 						dataType, encoding, compressor := getClientStorage(item.MeasurementType)
-						attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')" 
-						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",")
+						// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
+						//attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
+						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")  // attributes + 
 					}
 				}
 			}
 			sql := sb.String()[0:len(sb.String())-1] + ");" // replace trailing comma
+			//fmt.Println(sql)
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(createStatement)", err)
 			fmt.Println("IOTDB TEST QUERY: show timeseries " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*;")
@@ -1580,7 +1545,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 		case "insert": // insert(append) data; retain schema; either single or multiple statements;
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
 			timeIndex := 0
-			nBlocks := len(iot.Dataset)/(blockSize) + 1
+			blockSize := getBlockSize(len(iot.Measurements))
+			nBlocks := len(iot.Dataset)/blockSize + 1
 			fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
 			for block := 0; block < nBlocks; block++ {
 				//fmt.Print(block + 1)
@@ -1624,6 +1590,40 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 	} // for
 
 	return nil
+}
+
+func MaintainIotDB() {
+	iotdbConnection, _ := Init_IoTDB(true)
+	fmt.Println(iotdbConnection)
+	// FLUSH root.combed,root.ecobee,root.AMP,root.homec,root.toniot,root.opsd ON LOCAL
+	// CLEAR CACHE
+	// _, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
+	// checkErr("ExecuteNonQueryStatement(createStatement)", err)
+}
+
+// Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
+func main() {
+	//fmt.Println(ShowLastExternalBackup())
+	sourceDataType := "help"
+	if len(os.Args) > 1 {
+		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
+	}
+
+	switch sourceDataType {
+	case ".clean": 
+		MaintainIotDB()
+	case ".csv":
+		ProcessCsvSensorData(os.Args)
+	case ".nc": // this reads the var file too.
+		ProcessNcSensorData(os.Args)
+	//case ".hd5":
+	default:
+		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
+		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
+		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
+		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
+		os.Exit(0)
+	}
 }
 
 /*func printDataSet(sds *client.SessionDataSet) []string {
