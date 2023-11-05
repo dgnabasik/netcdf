@@ -1258,7 +1258,7 @@ func configureIotdbAccess() *client.Config {
 	}
 	envFound := len(iotdbParameters.Host) > 0 && len(iotdbParameters.Port) > 0
 	if !envFound {
-		flag.StringVar(&iotdbParameters.Host, "host", "127.0.0.1", "--host=10.103.4.83")
+		flag.StringVar(&iotdbParameters.Host, "host", "127.0.0.1", "--host=10.103.4.83")//<<<
 		flag.StringVar(&iotdbParameters.Port, "port", "6667", "--port=6667") // sudo netstat -peanut | grep 6667 ==> 3 lines
 		flag.StringVar(&iotdbParameters.User, "user", "root", "--user=root")
 		flag.StringVar(&iotdbParameters.Password, "password", "root", "--password=root")
@@ -1592,15 +1592,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 	return nil
 }
 
-func MaintainIotDB() {
-	iotdbConnection, _ := Init_IoTDB(true)
-	fmt.Println(iotdbConnection)
-	// FLUSH root.combed,root.ecobee,root.AMP,root.homec,root.toniot,root.opsd ON LOCAL
-	// CLEAR CACHE
-	// _, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
-	// checkErr("ExecuteNonQueryStatement(createStatement)", err)
-}
-
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
 func main() {
 	//fmt.Println(ShowLastExternalBackup())
@@ -1610,8 +1601,6 @@ func main() {
 	}
 
 	switch sourceDataType {
-	case ".clean":
-		MaintainIotDB()
 	case ".csv":
 		ProcessCsvSensorData(os.Args)
 	case ".nc": // this reads the var file too.
