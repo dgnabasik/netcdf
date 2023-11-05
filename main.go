@@ -42,17 +42,17 @@ const ( // these do not include trailing >
 	csvExtension    = ".csv"
 	varExtension    = ".var"
 	ncExtension     = ".nc"
-	crlf            = "\n"	
-	endOfFields	 	= "\\"
+	crlf            = "\n"
+	endOfFields     = "\\"
 	timeAlias       = "Time1"
 	maxColumns      = 512
 	interpolated    = "interpolated"
 	unitsName       = "units"
 	LastColumnName  = "DatasetName"
-	unknown        = "???"
-	zero           = 0.0
-	graphDbPrefix  = "PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0A"
-	graphDbPostfix = "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%208%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A"
+	unknown         = "???"
+	zero            = 0.0
+	graphDbPrefix   = "PREFIX%20%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2F%3E%0APREFIX%20inst%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Finstance%2F%3E%0APREFIX%20psi%3A%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2F%3E%0A"
+	graphDbPostfix  = "%3E%3B%0Apsi%3AsearchPredicate%20%3Chttp%3A%2F%2Fwww.ontotext.com%2Fgraphdb%2Fsimilarity%2Fpsi%2Fany%3E%3B%0A%3AsearchParameters%20%22-numsearchresults%208%22%3B%0Apsi%3AentityResult%20%3Fresult%20.%0A%3Fresult%20%3Avalue%20%3Fentity%20%3B%0A%3Ascore%20%3Fscore%20.%20%7D%0A"
 )
 
 // Non-generic version looks for first embedded string match. Return empty string if not found.
@@ -75,17 +75,17 @@ func checkErr(title string, err error) {
 }
 
 // var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
-//var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
-//var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
+// var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
+// var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var rowsXsdMap = map[string]string{"dateTime": "datetime", "Unicode": "string", "unicode": "string", "Float": "float", "float": "float", "Integer": "integer", "integer": "integer", "Longint": "int64", "longint": "int64", "Double": "double", "double": "double"}
 
 func getBlockSize(nMeasurements int) int {
 	if nMeasurements < 256 {
-		return 163840 //=20*8192 	131072=16*8192
+		return 131072 // 131072=16*8192
 	}
 	if nMeasurements < 512 {
-		return 4*8192
+		return 4 * 8192
 	}
 	return 8192
 }
@@ -492,7 +492,7 @@ func (cdf *NetCDF) NormalizeValues() {
 	for ndx1 := 0; ndx1 < len(cdf.Dataset[0]); ndx1++ { // number of columns
 		for ndx2 := 1; ndx2 < len(cdf.Dataset); ndx2++ { // number of rows
 			fval, err := strconv.ParseFloat(cdf.Dataset[ndx2][ndx1], 64)
-			if err == nil && fval < minimum {  
+			if err == nil && fval < minimum {
 				cdf.Dataset[ndx2][ndx1] = "0"
 				changed++
 			}
@@ -666,7 +666,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
 							// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
 							//attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
-							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes + 
+							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
 						}
 					}
 				}
@@ -1194,7 +1194,7 @@ func formatDataItem(s, dataType string) string {
 		if len(s) == 0 {
 			return "null"
 		} else {
-			return s  // float
+			return s // float
 		}
 	}
 }
@@ -1428,7 +1428,7 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
-		theEnd := dataColumnName == interpolated || strings.TrimSpace(iot.Summary[ndx+1][0]) == endOfFields 
+		theEnd := dataColumnName == interpolated || strings.TrimSpace(iot.Summary[ndx+1][0]) == endOfFields
 		if !theEnd {
 			mi := MeasurementItem{
 				MeasurementName:  aliasName, // the CSV field names are often unusable.
@@ -1524,7 +1524,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 						dataType, encoding, compressor := getClientStorage(item.MeasurementType)
 						// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
 						//attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
-						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",")  // attributes + 
+						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
 					}
 				}
 			}
@@ -1610,7 +1610,7 @@ func main() {
 	}
 
 	switch sourceDataType {
-	case ".clean": 
+	case ".clean":
 		MaintainIotDB()
 	case ".csv":
 		ProcessCsvSensorData(os.Args)
