@@ -1,8 +1,9 @@
 package main    
 // attributeTags.go program outputs IoTDB commands that add IoTDB timeseries ATTRIBUTES & TAGS. Use UPSERT to change values. 
+// ExecuteAlterStatements() no longer has to be run.
 // https://iotdb.apache.org/UserGuide/V1.0.x/Syntax-Conventions/KeyValue-Pair.html
 // Setting an alias, tag, and attribute for an aligned timeseries is supported as of Nov. 3, 2023 (v1.2.2).
-
+// CREATE timeseries root.turbine.d1.s1(temprature) WITH datatype = FLOAT, encoding = RLE, compression = SNAPPY, 'max_point_number' = '5' TAGS('tag1' = 'v1', 'tag2'= 'v2') ATTRIBUTES('attr1' = 'v1', 'attr2' = 'v2')
 import (
     "errors"
     "fmt"
@@ -1826,7 +1827,9 @@ func executeStatements(description string, statements []string) {
     fmt.Println()
 }
 
-func ExecuteAlterStatements() {
+func ExecuteAlterStatements() { 
+    fmt.Println("Alter statements for ATTRIBUTES & TAGS last applied 2023-11-05.")
+    return
 	iotdbConnection, ok := Init_IoTDB(true)
     if !ok {
         checkErr("ExecuteAlterStatements(Init_IoTDB): ", errors.New(iotdbConnection))

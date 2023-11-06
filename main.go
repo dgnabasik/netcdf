@@ -651,7 +651,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			}
 
 		case "createts":
-			// create aligned time series schema; single statement: CREATE ALIGNED TIMESERIES root.etsidata.household_data_1min_singleindex.<id> (utc_timestamp TEXT encoding=PLAIN compressor=SNAPPY,  etc);
+			// Setting an alias, tag, and attribute for an aligned timeseries is supported as of Nov. 3, 2023 (v1.2.2).
+			// CREATE timeseries root.turbine.d1.s1(temprature) WITH datatype = FLOAT, encoding = RLE, compression = SNAPPY, 'max_point_number' = '5' TAGS('tag1' = 'v1', 'tag2'= 'v2') ATTRIBUTES('attr1' = 'v1', 'attr2' = 'v2')
 			// Note: For a group of aligned timeseries, Iotdb does not support different compressions.
 			// https://iotdb.apache.org/UserGuide/V1.0.x/Reference/SQL-Reference.html#schema-statement
 			var sb strings.Builder
@@ -665,7 +666,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 						if v.ColumnOrder == ndx && !v.Ignore {
 							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
 							// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
-							//attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
+							//<<<attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
 							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
 						}
 					}
@@ -1183,13 +1184,14 @@ var clientConfig *client.Config
 // select this column of values from summary file as instance values.
 var summaryColumnNames = []string{"field", "type", "sum", "min", "max", "min_length", "max_length", "mean", "stddev", "median", "mode", "cardinality", "units"} // , LastColumnName
 
-// Replace embedded quote marks with backticks; return enclosed string.
+// Replace embedded quote marks with backticks; return enclosed string. Only for data insert statements!
 // Could format floats to constant width,precision. This function is called millions of times.
+// REFACTOR why are dateTime dataType formats not being passed in?
 func formatDataItem(s, dataType string) string {
-	dt := strings.ToLower(dataType)
-	if dt == "string" || dt == "unicode" || dt == "datetime" {
+	dt := strings.TrimSpace(strings.ToLower(dataType))
+	if dt == "string" || dt == "unicode" || dt == "datetime" || len(dt) == 0 { // hex40? boolean?
 		ss := strings.ReplaceAll(strings.ReplaceAll(s, "\"", "`"), "'", "`")
-		return "'" + ss + "'"
+		return "'" + ss + "'" 
 	} else {
 		if len(s) == 0 {
 			return "null"
@@ -1523,7 +1525,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 					if item.ColumnOrder == ndx && !item.Ignore {
 						dataType, encoding, compressor := getClientStorage(item.MeasurementType)
 						// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
-						//attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
+						//<<<attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
 						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
 					}
 				}
@@ -1549,7 +1551,6 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			nBlocks := len(iot.Dataset)/blockSize + 1
 			fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
 			for block := 0; block < nBlocks; block++ {
-				//fmt.Print(block + 1)
 				fmt.Print(".") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				var sb strings.Builder
 				var insert strings.Builder
@@ -1561,7 +1562,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				}
 				for r := startRow; r < endRow; r++ {
 					sb.Reset()
-					startTime, err := filesystem.GetStartTimeFromLongint(iot.Dataset[r][timeIndex])
+					startTime, err := filesystem.GetStartTimeFromLongint(iot.Dataset[r][timeIndex]) 
 					if err != nil {
 						fmt.Println(iot.Dataset[r][timeIndex])
 						break
@@ -1570,7 +1571,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 					for c := 0; c < len(iot.Dataset[r]); c++ {
 						for _, item := range iot.Measurements {
 							if item.ColumnOrder == c && !item.Ignore {
-								sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",")
+								sb.WriteString(formatDataItem(iot.Dataset[r][c], item.MeasurementType) + ",") 
 							}
 						}
 					}
