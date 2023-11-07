@@ -1,5 +1,7 @@
 README.md for netcdf repository:: 2023-07-03
-
+!!!!!!!!!!!! The two versions of filesystem.go have to be synchronized: 
+  /home/david/Documents/digital-twins/micro.services/filesystem/filesystem.go
+  /home/david/Documents/digital-twins/netcdf/filesystem/filesystem.go
 Program goals:
 1) Provide a customizable streaming sensor data publish/subscribe server for comsumption by Python, Golang, Java clients.
 2) Automatically generate SAREF-derived OWL class per data stream source; semantically enrich SAREF data.

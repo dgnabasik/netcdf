@@ -515,7 +515,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	checkErr("cdf.ReadCsvFile ", err)
 	nBlocks := cdf.Dimensions["id"]     //=990	 len(cdf.Dataset)/(blockSize) + 1
 	blockSize := cdf.Dimensions["time"] // scope override
-	timeIndex := 1                      // to calculate
+	timeIndex := 1
 	fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
 	for block := 0; block < nBlocks; block++ {
 		fmt.Print(block + 1)
@@ -530,12 +530,12 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 		}
 		for r := startRow; r < endRow; r++ {
 			sb.Reset()
-			startTime, err := filesystem.GetStartTimeFromString(cdf.Dataset[r][timeIndex])
+			startTime, err := filesystem.GetStartTimeFromLongint(cdf.Dataset[r][timeIndex])
 			if err != nil {
 				fmt.Println("Appears to be a bad time: " + cdf.Dataset[r][timeIndex])
 				break
 			}
-			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
+			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")//incroyable!
 			for c := 0; c < len(cdf.Dataset[r]); c++ {
 				for _, item := range cdf.Measurements {
 					if item.ColumnOrder == c && !item.Ignore {
@@ -640,13 +640,13 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
 			fmt.Println(sql)
 
-		case "dropts": // time series schema; uses single statement;
+		case "dropts": // time series schema; uses single statement; REFACTOR: this drops all timeseries, but can be changed to drop individual timeseries.
 			for id := 0; id < len(cdf.HouseIndices); id++ {
 				sql := "DROP TIMESERIES " + IotDatasetPrefix(cdf.Identifier, cdf.HouseIndices[id]) + "*"
 				_, err := cdf.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 				checkErr("ExecuteNonQueryStatement(dropStatement)", err)
 			}
-			for k := range cdf.Measurements { // RETEST!
+			for k := range cdf.Measurements { 
 				delete(cdf.Measurements, k)
 			}
 
@@ -692,6 +692,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + cdf.Identifier + ".*;")
+			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + ";")
 		}
 		fmt.Println("Timeseries <" + command + "> completed.")
 	} // for
@@ -1007,7 +1008,6 @@ func GetOutputPath(filePath, ext string) string {
 
 func CreateIotSession(programArgs []string) bool {
 	createIotSession := !(len(programArgs) == 3 && programArgs[2] == timeSeriesCommands[0])
-	fmt.Println("createIotSession")
 	if createIotSession {
 		iotdbConnection, ok := Init_IoTDB(createIotSession)
 		if !ok {
@@ -1465,6 +1465,9 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 			}
 		}
 	}
+	if len(sb.String() < 1 {
+		return " "
+	}
 	str := sb.String()[0:len(sb.String())-1] + " " // replace trailing comma
 	return str
 }
@@ -1483,6 +1486,15 @@ func (iot *IoTDbCsvDataFile) ReadCsvFile(filePath string, isDataset bool) error 
 	}
 	checkErr("Unable to parse file as CSV for "+filePath, err)
 	return err
+}
+
+func (iot *IoTDbCsvDataFile) GetRowNumberFromName(rowName string) int {
+	for ndx := 0; ndx < len(iot.Summary[0]); ndx++ {
+		if strings.EqualFold(iot.Summary[ndx][0], rowName) {
+			return ndx
+		}
+	}
+	return -1
 }
 
 // Command-line parameters: {drop create delete insert ...}. Always output dataset description.
@@ -1506,11 +1518,11 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			checkErr("ExecuteNonQueryStatement(createDBstatement)", err)
 			fmt.Println(sql)
 
-		case "dropts": // time series schema; uses single statement;
+		case "dropts": // time series schema; uses single statement; REFACTOR: this drops all timeseries, but can be changed to drop individual timeseries.
 			sql := "DROP TIMESERIES " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ".*"
 			_, err := iot.IoTDbAccess.session.ExecuteNonQueryStatement(sql)
 			checkErr("ExecuteNonQueryStatement(dropStatement)", err)
-			for k := range iot.Measurements { // does not account for Ignore items.
+			for k := range iot.Measurements { 
 				delete(iot.Measurements, k)
 			}
 
@@ -1544,9 +1556,9 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 			_, err := iot.IoTDbAccess.session.ExecuteBatchStatement(deleteStatements) // (r *common.TSStatus, err error)
 			checkErr("ExecuteBatchStatement(deleteStatements)", err)
 
-		case "insert": // insert(append) data; retain schema; either single or multiple statements;
+		case "insert": 
 			// Automatically inserts long time column as first column (which should be UTC). Save in blocks.
-			timeIndex := 0
+			timeIndex := iot.GetRowNumberFromName(iot.TimeMeasurementName) - 1
 			blockSize := getBlockSize(len(iot.Measurements))
 			nBlocks := len(iot.Dataset)/blockSize + 1
 			fmt.Printf("%s%d%s", "Writing ", nBlocks, " blocks: ")
@@ -1554,7 +1566,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				fmt.Print(".") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				var sb strings.Builder
 				var insert strings.Builder
-				insert.WriteString("INSERT INTO " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " (time, " + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
+				insert.WriteString("INSERT INTO " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " (timestamp, " + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
+				//fmt.Println(insert.String())//<<<<
 				startRow := blockSize*block + 1
 				endRow := startRow + blockSize
 				if block == nBlocks-1 {
@@ -1564,10 +1577,10 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 					sb.Reset()
 					startTime, err := filesystem.GetStartTimeFromLongint(iot.Dataset[r][timeIndex]) 
 					if err != nil {
-						fmt.Println(iot.Dataset[r][timeIndex])
+						fmt.Println("Bad start time: <" + iot.Dataset[r][timeIndex]+">")
 						break
 					}
-					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix(), 10) + ",")
+					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")//incroyable!
 					for c := 0; c < len(iot.Dataset[r]); c++ {
 						for _, item := range iot.Measurements {
 							if item.ColumnOrder == c && !item.Ignore {
@@ -1585,6 +1598,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
 			}
 			fmt.Println("\nIOTDB TEST QUERY: SELECT COUNT(*) FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ";")
+			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ";")
 		}
 
 		fmt.Println("Timeseries <" + command + "> completed.")
@@ -1600,7 +1614,9 @@ func main() {
 	if len(os.Args) > 1 {
 		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
 	}
-
+	if len(os.Args) < 3 {
+		sourceDataType = "help"
+	}
 	switch sourceDataType {
 	case ".csv":
 		ProcessCsvSensorData(os.Args)
@@ -1611,7 +1627,14 @@ func main() {
 		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
 		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
 		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
-		fmt.Println(" followed by one or more commands: create, insert, drop, delete, query, example.")
+		fmt.Println("followed by one or more commands: ")
+		fmt.Println("  createdb : create a database for the first time once.")
+		fmt.Println("  createts : create a set of time series measurements once.")
+		fmt.Println("  insert	: insert the data from a CSV file.")
+		fmt.Println("  dropts   : drop the entire set of time series measurements but keep the database. Run this command by itself.")
+		fmt.Println("  delete	: delete a specific time series measurement and its data.")
+		//fmt.Println("  query	: execute a specific query against a database.")
+		//fmt.Println("  example: produce a (random) time series instance.")
 		os.Exit(0)
 	}
 }

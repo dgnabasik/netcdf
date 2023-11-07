@@ -45,22 +45,20 @@ func GetCurrentDateTime(dateOnly bool) string {
 func GetStartTimeFromLongint(someTime string) (time.Time, error) {
 	isLong, err := strconv.ParseInt(someTime, 10, 64)
 	if err == nil {
-		return time.Unix(isLong, 0), err
+		return time.Unix(isLong, 0), nil  // 2016-01-03 02:42:50 +0100 CET
 	}
-	t, err := time.Parse(DateTimeFormat, someTime)
-	if err != nil {
-		return time.Unix(isLong, 0), err
-	}
-	return t, nil
-}
 
-// Process: 2017-01-18 10:40:00
-func GetStartTimeFromString(someTime string) (time.Time, error) {
-	t, err := time.Parse(TimeFormat1, someTime)
-	if err != nil {
-		return t, err
+	t1, err := time.Parse(DateTimeFormat, someTime)
+	if err == nil {
+		return t1, nil
+	} 
+
+	t2, err := time.Parse(TimeFormat1, someTime)
+	if err == nil {
+		return t2, nil
 	}
-	return t, nil
+
+	return time.Now(), err
 }
 
 // Return yyyy-MM-dd
