@@ -665,9 +665,8 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 					for _, v := range cdf.Measurements {
 						if v.ColumnOrder == ndx && !v.Ignore {
 							dataType, encoding, compressor := getClientStorage(v.MeasurementItem.MeasurementType)
-							// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
-							//<<<attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
-							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
+							attributes := " ATTRIBUTES('datatype'='" + v.MeasurementType  + "') TAGS('units'='" + v.MeasurementUnits + "')"
+							sb.WriteString(v.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",") 
 						}
 					}
 				}
@@ -692,7 +691,7 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + cdf.Identifier + ".*;")
-			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + ";")
+			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + " LIMIT 2;")
 		}
 		fmt.Println("Timeseries <" + command + "> completed.")
 	} // for
@@ -1066,117 +1065,6 @@ func ProcessNcSensorData(programArgs []string) {
 	checkErr("ProcessTimeseries(nc)", err)
 }
 
-// Return a NamedIndividual unit_of_measure from an abreviated key. All of these are specified at the uomPrefix URI.
-// This expects you to manually add the map keys to the (last) Units column header in every *.var file.
-// REFACTOR to get from website?
-func GetNamedIndividualUnitMeasure(uom string) string {
-	const uomPrefix = "http://www.ontology-of-units-of-measure.org/resource/om-2/"
-	const varPrefix = "https://energyknowledgebase.com/topics/volt-ampere-reactive-var.asp"
-	var unitsOfMeasure = map[string]string{
-		"kW":       uomPrefix + "kilowatt",
-		"kWh":      uomPrefix + "kilowattHour",
-		"pascal":   uomPrefix + "pascal",
-		"kelvin":   uomPrefix + "kelvin",
-		"°C":       uomPrefix + "degreeCelsius",
-		"°F":       uomPrefix + "degreeFahrenheit",
-		"%rh":      uomPrefix + "PercentRelativeHumidity",
-		"mb":       uomPrefix + "millibar",
-		"degree":   uomPrefix + "degree",
-		"lux":      uomPrefix + "lux",
-		"km":       uomPrefix + "kilometre",
-		"dV":       uomPrefix + "decivolt",
-		"dA":       uomPrefix + "deciampere",
-		"Hz":       uomPrefix + "hertz",
-		"DPF":      "https://ctlsys.com/support/power_factor/",
-		"APF":      "https://ctlsys.com/support/power_factor/",
-		"VAR":      varPrefix,
-		"VAR.hour": varPrefix,
-		"VA":       "https://en.wikipedia.org/wiki/Volt-ampere",
-		"VA.hour":  "https://en.wikipedia.org/wiki/Volt-ampere",
-	}
-
-	switch uom {
-	case "km":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:kilometre rdf:type owl:NamedIndividual ,
-		saref:UnitOfMeasure ;
-		rdfs:comment "1000 metres."@en ;
-		rdfs:label "kilometre"@en .`
-
-	case "degree":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:degree rdf:type owl:NamedIndividual ,
-		saref:UnitOfMeasure ;
-		rdfs:comment "One unit of 360 degrees."@en ;
-		rdfs:label "degree"@en .`
-
-	case "lux":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:lux rdf:type owl:NamedIndividual ,
-		saref:IlluminanceUnit ;
-		rdfs:comment "The lux is a unit of illuminance defined as lumen divided by square metre = candela times steradian divided by square metre."@en ;
-		rdfs:label "lux"@en .`
-
-	case "mb":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:millibar rdf:type owl:NamedIndividual ,
-		saref:PressureUnit ;
-   		rdfs:comment "The millibar is a unit of pressure defined as 100 pascal."@en ;
-   		rdfs:label "millibar"@en .`
-
-	case "%rh":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:RelativeHumidity rdf:type owl:NamedIndividual ,
-		saref:Humidity ;
-		rdfs:comment "A saref:Property related to some measurements that are characterized by a certain value that is measured in percent relative humidity."@en ;
-		rdfs:label "percent relative humidity"@en .`
-
-	case "°F":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:degreeFahrenheit rdf:type owl:NamedIndividual ,
-		saref:TemperatureUnit ;
-		rdfs:comment "The degree Fahrenheit is a unit of temperature defined as 5.555556e-1 kelvin."@en ;
-		rdfs:label "degrees Fahrenheit"@en .`
-
-	case "°C":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:degreeCelsius rdf:type owl:NamedIndividual ,
-		saref:TemperatureUnit ;
-		rdfs:comment "The degree Celsius is a unit of temperature defined as 1 kelvin."@en ;
-		rdfs:label "degrees Celsius"@en .`
-
-	case "kelvin":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:kelvin rdf:type owl:NamedIndividual ,
-		saref:TemperatureUnit ;
-		rdfs:comment "The kelvin is a unit of temperature defined as 1/273.16 of the thermodynamic temperature of the triple point of water."@en ;
-		rdfs:label "degrees kelvin"@en .`
-
-	case "pascal":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:pascal rdf:type owl:NamedIndividual ,
-		saref:PressureUnit ;
-		rdfs:comment "The pascal is a unit of pressure and stress defined as newton divided by square metre = joule divided by cubic metre = kilogram divided by metre second squared."@en ;
-		rdfs:label "pascal"@en .`
-
-	case "kW":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:kilowatt rdf:type owl:NamedIndividual ,
-		saref:PowerUnit ;
-		rdfs:comment "The watt is a unit of power defined as joule divided by second = newton times metre divided by second = volt times ampere = kilogram times square metre divided by second to the power 3."@en ;
-		rdfs:label "kilowatt"@en .`
-
-	case "kWh":
-		return "### " + unitsOfMeasure[uom] +
-			`uom:kilowattHour rdf:type owl:NamedIndividual ,
-		saref:EnergyUnit ;
-		rdfs:comment "The kiloWatt Hour is a unit of energy equivalent to 1000 watts of power expended during one hour of time. An energy expenditure of 1 Wh represents 3600 joules "@en ;
-		rdfs:label "kilowatt hour"@en .`
-	}
-
-	return unknown
-}
-
 var timeSeriesCommands = []string{"createdb", "createts", "dropts", "delete", "insert"}
 var iotdbParameters IoTDbProgramParameters
 var clientConfig *client.Config
@@ -1465,7 +1353,7 @@ func (iot *IoTDbCsvDataFile) FormattedColumnNames() string {
 			}
 		}
 	}
-	if len(sb.String() < 1 {
+	if len(sb.String()) < 1 {
 		return " "
 	}
 	str := sb.String()[0:len(sb.String())-1] + " " // replace trailing comma
@@ -1536,9 +1424,8 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				for _, item := range iot.Measurements {
 					if item.ColumnOrder == ndx && !item.Ignore {
 						dataType, encoding, compressor := getClientStorage(item.MeasurementType)
-						// Note: It is not currently supported to set an alias, tag, and attribute for aligned timeseries.
-						//<<<attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
-						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + ",") // attributes +
+						attributes := " ATTRIBUTES('datatype'='" + item.MeasurementType  + "') TAGS('units'='" + item.MeasurementUnits + "')"
+						sb.WriteString(item.MeasurementAlias + " " + dataType + " encoding=" + encoding + " compressor=" + compressor + attributes + ",") 
 					}
 				}
 			}
@@ -1598,7 +1485,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				checkErr("ExecuteNonQueryStatement(insertStatement)", err)
 			}
 			fmt.Println("\nIOTDB TEST QUERY: SELECT COUNT(*) FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ";")
-			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + ";")
+			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " LIMIT 2;")
 		}
 
 		fmt.Println("Timeseries <" + command + "> completed.")
@@ -1626,7 +1513,7 @@ func main() {
 	default:
 		fmt.Println("The commands to the netcdf program copy time series data from source files into the IoT database.")
 		fmt.Println("Before running netcdf, run the 'xsv stats <dataFile.csv> --everything' program to place a csv summary* file in the same folder as the <dataFile.csv>.")
-		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
+		fmt.Println("netcdf parameters: full path to csv or nc sensor data file, followed by case-sensitive timeMeasurementName, followed by an (optional) CDF file type {HDF5, netCDF-4, classic}, ")
 		fmt.Println("followed by one or more commands: ")
 		fmt.Println("  createdb : create a database for the first time once.")
 		fmt.Println("  createts : create a set of time series measurements once.")
