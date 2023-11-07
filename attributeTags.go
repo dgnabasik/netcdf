@@ -143,6 +143,67 @@ func AMP_Vancouver1() []string {
     return statements
 }
 
+func AMP_Vancouver2() []string {
+    statements := make([]string, 0)
+	const prefix0 string = alter + "root.AMP.Vancouver."
+	var DatasetList1  = []string{"Water_HTW.", "Water_WHW.", "Water_DWW."} 
+    var TimeseriesList1 = []string{"DatasetName", "Unix_ts", "Counter", "Avg_rate", "Inst_rate"}
+    var dataSetTypes1 = []string{unicode, "'longint';", "'float';", "'float';", "'float';"}
+	var dataSetUnits1 = []string{unicode, "'unixutc';", "'liters';", "'liters/minute';", "'liters/minute';"} // Water_DWW does not have the last measurement.
+
+    var DatasetList2  = []string{"NaturalGas_WHG.", "NaturalGas_FRG."} 
+    var TimeseriesList2 = []string{"DatasetName", "Unix_ts", "Counter", "Avg_rate", "Inst_rate"}
+    var dataSetTypes2 = []string{unicode, "'longint';", "'float';", "'float';", "'float';"}
+	var dataSetUnits2 = []string{unicode, "'unixutc';", "'dm^3';", "'dm^3/hour';", "'dm^3/hour';"} // NaturalGas_FRG does not have the last measurement.
+
+	for n0,_ := range DatasetList1 {
+		for n1,_ := range TimeseriesList1 {
+            statements = append(statements, prefix0+DatasetList1[n0]+TimeseriesList1[n1]+attributes+dataSetTypes1[n1])	
+            statements = append(statements, prefix0+DatasetList1[n0]+TimeseriesList1[n1]+tags+dataSetUnits1[n1])	
+        }
+    }
+
+	for n0,_ := range DatasetList2 {
+		for n1,_ := range TimeseriesList2 {
+            statements = append(statements, prefix0+DatasetList2[n0]+TimeseriesList2[n1]+attributes+dataSetTypes2[n1])	
+            statements = append(statements, prefix0+DatasetList2[n0]+TimeseriesList2[n1]+tags+dataSetUnits2[n1])	
+        }
+    }
+    return statements
+}
+
+func AMP_Vancouver3() []string {
+    statements := make([]string, 0)
+	const prefix0 string = alter + "root.AMP.Vancouver.Electricity_"
+	var DatasetList = []string{"B1E.","TVE.","UTE.","OUE.","OFE.","HTE.","HPE.","GRE.","FRE.","FGE.","EQE.","EBE.","DWE.","DNE.","CWE.","CDE.","BME.","B2E.","WHE.","WOE.","RSE."} // no "MHE","UNE"
+    var dataSetTypes = []string{"'int32';", "'int32';", "'int32';", "'int32';", "'int32';", "'int32';", "'float';","'float';","'float';","'float';","'float';" } // ATTRIBUTES
+    var dataSetUnits = []string{"'VAR';", "'VAR.hour';", "'VAR';", "'VAR.hour';", "'VA';", "'VA.hour';", "'dV';", "'dA';", "'Hz';", "'DPF';", "'APF';" }    // TAGS
+	var TimeseriesList = []string{ // does not include Unix_ts & DatasetName
+        "RealPower_P",
+        "RealEnergy_Pt",
+        "ReactivePower_Q", 
+        "ReactiveEnergy_Qt", 
+        "ApparentPower_S",  // should be 'VA'
+        "ApparentEnergy_St",// should be 'VA.hour'
+        "LineVoltage_V", 
+        "LineCurrent_I",
+        "LineFrequency_f", 
+        "Displacement_PF", 
+        "Apparent_PF",  } 
+
+    for n0,_ := range DatasetList {
+		statements = append(statements, prefix0+DatasetList[n0]+"Unix_ts"+attributes+"'longint';")	
+		statements = append(statements, prefix0+DatasetList[n0]+"Unix_ts"+tags+"'unixutc';")	
+		statements = append(statements, prefix0+DatasetList[n0]+"DatasetName"+attributes+unicode)	
+		statements = append(statements, prefix0+DatasetList[n0]+"DatasetName"+tags+unicode)	
+		for n1,_ := range TimeseriesList{
+			statements = append(statements, prefix0+DatasetList[n0]+TimeseriesList[n1]+attributes+dataSetTypes[n1])	
+			statements = append(statements, prefix0+DatasetList[n0]+TimeseriesList[n1]+tags+dataSetUnits[n1])
+		}
+	}
+    return statements
+}
+
 func ecobee() []string {
     statements := make([]string, 0)
 	const prefix0 string = alter + "root.ecobee.household."
@@ -1182,35 +1243,6 @@ func ecobee() []string {
     return statements
 }
 
-func AMP_Vancouver2() []string {
-    statements := make([]string, 0)
-	const prefix0 string = alter + "root.AMP.Vancouver."
-	var DatasetList1  = []string{"Water_HTW.", "Water_WHW.", "Water_DWW."} 
-    var TimeseriesList1 = []string{"DatasetName", "Unix_ts", "Counter", "Avg_rate", "Inst_rate"}
-    var dataSetTypes1 = []string{unicode, "'longint';", "'float';", "'float';", "'float';"}
-	var dataSetUnits1 = []string{unicode, "'unixutc';", "'liters';", "'liters/minute';", "'liters/minute';"} // Water_DWW does not have the last measurement.
-
-    var DatasetList2  = []string{"NaturalGas_WHG.", "NaturalGas_FRG."} 
-    var TimeseriesList2 = []string{"DatasetName", "Unix_ts", "Counter", "Avg_rate", "Inst_rate"}
-    var dataSetTypes2 = []string{unicode, "'longint';", "'float';", "'float';", "'float';"}
-	var dataSetUnits2 = []string{unicode, "'unixutc';", "'dm^3';", "'dm^3/hour';", "'dm^3/hour';"} // NaturalGas_FRG does not have the last measurement.
-
-	for n0,_ := range DatasetList1 {
-		for n1,_ := range TimeseriesList1 {
-            statements = append(statements, prefix0+DatasetList1[n0]+TimeseriesList1[n1]+attributes+dataSetTypes1[n1])	
-            statements = append(statements, prefix0+DatasetList1[n0]+TimeseriesList1[n1]+tags+dataSetUnits1[n1])	
-        }
-    }
-
-	for n0,_ := range DatasetList2 {
-		for n1,_ := range TimeseriesList2 {
-            statements = append(statements, prefix0+DatasetList2[n0]+TimeseriesList2[n1]+attributes+dataSetTypes2[n1])	
-            statements = append(statements, prefix0+DatasetList2[n0]+TimeseriesList2[n1]+tags+dataSetUnits2[n1])	
-        }
-    }
-    return statements
-}
-
 func homec_weather() []string {
     statements := make([]string, 0)
     const prefix0 = alter + "root.homec.weather.HomeC."
@@ -1828,7 +1860,7 @@ func executeStatements(description string, statements []string) {
 }
 
 func ExecuteAlterStatements() { 
-    fmt.Println("Alter statements for ATTRIBUTES & TAGS last applied 2023-11-05.")
+    fmt.Println("Alter statements for ATTRIBUTES & TAGS last applied 2023-11-06.")
     return
 	iotdbConnection, ok := Init_IoTDB(true)
     if !ok {
@@ -1836,13 +1868,14 @@ func ExecuteAlterStatements() {
         os.Exit(1)
     }
 
-    executeStatements("Altering root.combed.iiitd", combed_iiitd())
-	executeStatements("Altering root.AMP.Vancouver(1)", AMP_Vancouver1())
-	executeStatements("Altering root.ecobee", ecobee())
-	executeStatements("Altering root.AMP.Vancouver(2)", AMP_Vancouver2())
-    executeStatements("Altering root.homec.weather", homec_weather())
-    executeStatements("Altering root.toniot.synthetic", toniot_synthetic())
-    executeStatements("Altering root.opsd.household", opsd_household())
-    executeStatements("Altering root.opsd.timeseries", opsd_timeseries())
+    //executeStatements("Altering root.combed.iiitd", combed_iiitd())
+	//executeStatements("Altering root.ecobee", ecobee())
+	//executeStatements("Altering root.AMP.Vancouver(1)", AMP_Vancouver1())
+	//executeStatements("Altering root.AMP.Vancouver(2)", AMP_Vancouver2())
+	//executeStatements("Altering root.AMP.Vancouver(3)", AMP_Vancouver3())
+    //executeStatements("Altering root.homec.weather", homec_weather())
+    //executeStatements("Altering root.toniot.synthetic", toniot_synthetic())
+    //executeStatements("Altering root.opsd.household", opsd_household())
+    //executeStatements("Altering root.opsd.timeseries", opsd_timeseries())
 }
 

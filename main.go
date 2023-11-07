@@ -535,7 +535,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 				fmt.Println("Appears to be a bad time: " + cdf.Dataset[r][timeIndex])
 				break
 			}
-			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")//incroyable!
+			sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")
 			for c := 0; c < len(cdf.Dataset[r]); c++ {
 				for _, item := range cdf.Measurements {
 					if item.ColumnOrder == c && !item.Ignore {
@@ -556,7 +556,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 	return err
 }
 
-// Assume time series have been created; erase existing data; insert data. Assigns cdf.Dataset. INCOMPLETE! Converted *.nc files to CSV files. See CopyCSVTimeseriesDataIntoIotDB().
+// Assume time series have been created; erase existing data; insert data. Assigns cdf.Dataset. Converted *.nc files to CSV files. See CopyCSVTimeseriesDataIntoIotDB().
 // mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	iotPrefix := IotDatasetPrefix(cdf.Identifier, "{device-id}")
@@ -621,7 +621,7 @@ func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	return nil
 }
 
-// Similar to the iot version but not the same.
+// Not the same as the iot version.
 func (cdf *NetCDF) ProcessTimeseries() error {
 	if cdf.IoTDbAccess.ActiveSession {
 		cdf.IoTDbAccess.session = client.NewSession(clientConfig)
@@ -1453,8 +1453,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 				fmt.Print(".") //fmt.Printf("%s%d-%d\n", "block: ", startRow, endRow-1)
 				var sb strings.Builder
 				var insert strings.Builder
-				insert.WriteString("INSERT INTO " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " (timestamp, " + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
-				//fmt.Println(insert.String())//<<<<
+				insert.WriteString("INSERT INTO " + IotDatasetPrefix(iot.Identifier, iot.DatasetName) + " (time, " + iot.FormattedColumnNames() + ") ALIGNED VALUES ")
 				startRow := blockSize*block + 1
 				endRow := startRow + blockSize
 				if block == nBlocks-1 {
@@ -1467,7 +1466,7 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 						fmt.Println("Bad start time: <" + iot.Dataset[r][timeIndex]+">")
 						break
 					}
-					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")//incroyable!
+					sb.WriteString("(" + strconv.FormatInt(startTime.UTC().Unix()*1000, 10) + ",")
 					for c := 0; c < len(iot.Dataset[r]); c++ {
 						for _, item := range iot.Measurements {
 							if item.ColumnOrder == c && !item.Ignore {
@@ -1497,17 +1496,21 @@ func (iot *IoTDbCsvDataFile) ProcessTimeseries() error {
 // Data source file types determined by file extension: {.nc, .csv, .hd5}  Args[0] is program name.
 func main() {
 	//fmt.Println(ShowLastExternalBackup())
+	//ExecuteAlterStatements()
+	//os.Exit(0)
+	
 	sourceDataType := "help"
 	if len(os.Args) > 1 {
-		sourceDataType = strings.ToLower(path.Ext(os.Args[1]))
+		sourceDataType = path.Ext(os.Args[1])
 	}
 	if len(os.Args) < 3 {
 		sourceDataType = "help"
 	}
+
 	switch sourceDataType {
 	case ".csv":
 		ProcessCsvSensorData(os.Args)
-	case ".nc": // this reads the var file too.
+	case ".nc": 
 		ProcessNcSensorData(os.Args)
 	//case ".hd5":
 	default:
