@@ -26,6 +26,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path"
 	"path/filepath"
@@ -389,39 +390,11 @@ func (cdf *NetCDF) GetColumnNumberFromName(columnName string) int {
 	return -1
 }
 
-/*
-func (cdf *NetCDF) GetRowNumberFromName(rowName string) int {
-	for ndx := 0; ndx < maxRows; ndx++ {
-		if strings.ToLower(cdf.Summary[ndx][0]) == strings.ToLower(rowName) {
-			return ndx
-		}
-	}
-	return -1
+// test Summary{sum, min, max} columns.
+func isEmptyDataColumn(summary []string) bool {
+	empty := summary[2] == "0" && summary[3] == "0" && summary[4] == "0"
+	return empty
 }
-
-// Reconcile various timestamp formats. Return xsd:date format (yyyy-MM-dd)
-// TimeMeasurementName: {ecobee:3:units=yyyy-MM-dd hh:mm:ss}
-func (cdf *NetCDF) GetStartEndDates() (string, string) {
-	timeRow := cdf.GetRowNumberFromName(cdf.TimeMeasurementName)  // 2
-	sDate := cdf.Summary[timeRow][3]	// const
-	eDate := cdf.Summary[timeRow][4]
-	unitsColumn := cdf.GetColumnNumberFromName(unitsName)
-
-	if cdf.Summary[0][unitsColumn] == "unixutc" {
-		startTime, err := filesystem.GetStartTimeFromLongint(sDate)
-		if err != nil {
-			sDate = filesystem.GetDateStr(startTime)
-		}
-		endTime, err := filesystem.GetStartTimeFromLongint(eDate)
-		if err != nil {
-			eDate = filesystem.GetDateStr(endTime)
-		}
-	} else {
-		sDate = sDate[0:10]
-		eDate = eDate[0:10]
-	}
-	return sDate, eDate
-} */
 
 // Expects {Units, DatasetName} fields to have been appended to the summary file. Assign []Measurements. Expects Summary to be assigned. Use XSD data types.
 // len() only returns the length of the "external" array.
@@ -432,8 +405,8 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 	ndx1 := 0
 	dimMap := cdf.getDimensionMap()
 	for ndx := 0; ndx < maxColumns; ndx++ { // iterate over summary file rows.
-		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // NOTE!! does not include cdf.Summary[ndx+1][0] == "time" ||
-		ignore := (cdf.Summary[ndx+1][2] == "0" && cdf.Summary[ndx+1][4] == "0") || dataColumnName == interpolated
+		dataColumnName, aliasName := StandardName(cdf.Summary[ndx+1][0]) // dataColumnName is normalized for IotDB naming conventions.
+		ignore := isEmptyDataColumn(cdf.Summary[ndx+1]) || dataColumnName == interpolated 
 		if ignore {
 			fmt.Println("Ignoring empty data column " + dataColumnName)
 		}
@@ -443,27 +416,24 @@ func (cdf *NetCDF) XsvSummaryTypeMap() {
 			ndx1 = ndx
 			break
 		}
-		if !endOfMeasurements {
-			mi := MeasurementItem{
-				MeasurementName:  dataColumnName,
-				MeasurementAlias: aliasName,
-				MeasurementType:  rowsXsdMap[cdf.Summary[ndx+1][1]],
-				MeasurementUnits: cdf.Summary[ndx+1][unitsColumn],
-				ColumnOrder:      ndx,
-				Ignore:           ignore,
-			}
-			dimIndex, _ := dimMap[dataColumnName]
-			mv := MeasurementVariable{
-				MeasurementItem: mi,
-				DimensionIndex:  dimIndex,
-				FillValue:       "0. ", // or ""
-				Comment:         "",
-				Calendar:        "",
-			}
-			cdf.Measurements[dataColumnName] = &mv // add to map using original name
-		} else {
-			break
+
+		mi := MeasurementItem{
+			MeasurementName:  dataColumnName,
+			MeasurementAlias: aliasName,
+			MeasurementType:  rowsXsdMap[cdf.Summary[ndx+1][1]],
+			MeasurementUnits: cdf.Summary[ndx+1][unitsColumn],
+			ColumnOrder:      ndx,
+			Ignore:           ignore,
 		}
+		dimIndex, _ := dimMap[dataColumnName]
+		mv := MeasurementVariable{
+			MeasurementItem: mi,
+			DimensionIndex:  dimIndex,
+			FillValue:       "0. ", // or ""
+			Comment:         "",
+			Calendar:        "",
+		}
+		cdf.Measurements[dataColumnName] = &mv // add to map using original name
 	}
 	// add DatasetName timerseries in case data column names are the same for different sampling intervals.
 	mi := MeasurementItem{
@@ -492,7 +462,7 @@ func (cdf *NetCDF) NormalizeValues() {
 	for ndx1 := 0; ndx1 < len(cdf.Dataset[0]); ndx1++ { // number of columns
 		for ndx2 := 1; ndx2 < len(cdf.Dataset); ndx2++ { // number of rows
 			fval, err := strconv.ParseFloat(cdf.Dataset[ndx2][ndx1], 64)
-			if err == nil && fval < minimum {
+			if err == nil && math.Abs(fval) < minimum {
 				cdf.Dataset[ndx2][ndx1] = "0"
 				changed++
 			}
@@ -500,7 +470,7 @@ func (cdf *NetCDF) NormalizeValues() {
 	}
 	if changed > 0 {
 		fmt.Print(changed)
-		fmt.Print(" tiny values changed to 0 [< ")
+		fmt.Print(" absolute tiny values changed to 0 [< ")
 		fmt.Print(minimum)
 		fmt.Println("]")
 	}
@@ -540,7 +510,8 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 				for _, item := range cdf.Measurements {
 					if item.ColumnOrder == c && !item.Ignore {
 						sb.WriteString(formatDataItem(cdf.Dataset[r][c], item.MeasurementItem.MeasurementType) + ",")
-					}
+					} 
+
 				}
 			}
 			sb.WriteString(formatDataItem(cdf.DatasetName, "string") + ")")
@@ -560,7 +531,7 @@ func (cdf *NetCDF) CopyCsvTimeseriesDataIntoIotDB() error {
 // mapNetcdfGolangTypes: "byte": "int8", "ubyte": "uint8", "char": "string", "short": "int16", "ushort": "uint16", "int": "int32", "uint": "uint32", "int64": "int64", "uint64": "uint64", "float": "float32", "double": "float64"
 func (cdf *NetCDF) CopyNcTimeseriesDataIntoIotDB() error {
 	iotPrefix := IotDatasetPrefix(cdf.Identifier, "{device-id}")
-	const createMsg string = " time series not found -- run this program with the `create` parameter first " // also get this if no data in column
+	const createMsg string = " time series not found -- run this program with the `createts` parameter first " // also get this if no data in column
 	fileToRead := cdf.DataFilePath + "/" + cdf.DatasetName + ncExtension
 	nc, err := netcdf.OpenFile(fileToRead, netcdf.NOWRITE)
 	if err != nil {
@@ -691,7 +662,6 @@ func (cdf *NetCDF) ProcessTimeseries() error {
 			err := cdf.CopyCsvTimeseriesDataIntoIotDB()
 			checkErr("ExecuteNonQueryStatement(insertStatements)", err)
 			fmt.Println("IOTDB TEST QUERY: SELECT COUNT(*) FROM " + cdf.Identifier + ".*;")
-			fmt.Println("IOTDB TEST QUERY: SELECT * FROM " + IotDatasetPrefix(cdf.Identifier, cdf.DatasetName) + " LIMIT 2;")
 		}
 		fmt.Println("Timeseries <" + command + "> completed.")
 	} // for
@@ -1047,10 +1017,9 @@ func Initialize_IoTDbNcDataFile(isActive bool, programArgs []string) (NetCDF, er
 	isAccessibleSensorDataFile(programArgs[1])
 	xcdf, err := ParseVariableFile(outputPath+varExtension, fileType, datasetName, datasetName, programArgs, isActive)
 	checkErr("ParseVariableFile", err)
-	//fmt.Println(xcdf.ToString(true)) // true => output variables
 	err = xcdf.ReadCsvFile(GetSummaryFilename(programArgs[1]), false) // isDataset: no, is summary  REFACTOR: read from GraphDB?
+	//fmt.Println(xcdf.ToString(true)) // true => output variables
 	checkErr("ReadCsvFile ", err)
-	// where do I read the nc data file?
 	xcdf.TimeMeasurementName = programArgs[3]
 	xcdf.XsvSummaryTypeMap()
 	return xcdf, nil
@@ -1220,7 +1189,7 @@ func (iot *IoTDbCsvDataFile) NormalizeValues() {
 	for ndx1 := 0; ndx1 < len(iot.Dataset[0]); ndx1++ { // number of columns
 		for ndx2 := 1; ndx2 < len(iot.Dataset); ndx2++ { // number of rows
 			fval, err := strconv.ParseFloat(iot.Dataset[ndx2][ndx1], 64)
-			if err == nil && fval < minimum {
+			if err == nil && math.Abs(fval) < minimum {
 				iot.Dataset[ndx2][ndx1] = "0"
 				changed++
 			}
@@ -1228,7 +1197,7 @@ func (iot *IoTDbCsvDataFile) NormalizeValues() {
 	}
 	if changed > 0 {
 		fmt.Print(changed)
-		fmt.Print(" tiny values changed to 0 [< ")
+		fmt.Print(" absolute tiny values changed to 0 [< ")
 		fmt.Print(minimum)
 		fmt.Println("]")
 	}
@@ -1313,10 +1282,10 @@ func (iot *IoTDbCsvDataFile) XsvSummaryTypeMap() {
 			ndx1 = ndx
 			break
 		}
-		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // dataColumnName is normalized for IotDB naming conventions.
-		ignore := iot.Summary[ndx+1][0] == "time" || (iot.Summary[ndx+1][2] == "0" && iot.Summary[ndx+1][3] == "0" && iot.Summary[ndx+1][4] == "0") || dataColumnName == interpolated
+		dataColumnName, aliasName := StandardName(iot.Summary[ndx+1][0]) // dataColumnName is normalized for IotDB naming conventions.   
+		ignore := iot.Summary[ndx+1][0] == "time" || isEmptyDataColumn(iot.Summary[ndx+1]) || dataColumnName == interpolated
 		if ignore {
-			fmt.Println("Ignoring empty data column " + dataColumnName)
+			fmt.Println("Ignoring empty data column " + dataColumnName)			
 		}
 		theEnd := dataColumnName == interpolated || strings.TrimSpace(iot.Summary[ndx+1][0]) == endOfFields
 		if !theEnd {
