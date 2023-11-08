@@ -91,15 +91,6 @@ func ParseDate(dateValue string) time.Time {
 	}
 }
 
-// Problem: IoTDB can handle nano-seconds (3 more  places) 2019-03-31 12:36:52
-func DateParse(dateValue time.Time) string {
-	var a [20]byte
-	var b = a[:0]
-	b = dateValue.AppendFormat(b, time.RFC3339)
-	b[10] = 'T'
-	return string(b[0:19]) + ".000+01:00"
-}
-
 // non-generic version looks for first embedded string match. Return -1 if not found.
 func Find(lines []string, target string) (int, bool) {
 	for ndx, v := range lines {
