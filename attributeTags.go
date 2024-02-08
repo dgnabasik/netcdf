@@ -1195,7 +1195,7 @@ func ecobee() []string {
 
 	var TimeseriesList = []string{ //32
 	"Id",
-	"time1",
+	"Time1",
 	"State",
 	"HVAC_Mode",
 	"Event",
@@ -1247,6 +1247,7 @@ func homec_weather() []string {
     statements := make([]string, 0)
     const prefix0 = alter + "root.homec.weather.HomeC."
 	var TimeseriesList = []string{
+        "Time1",
         "Dishwasher_KW",
         "GarageDoor_KW",
         "LivingRoom_KW",
@@ -1280,8 +1281,8 @@ func homec_weather() []string {
         "CloudCover",
         "WindBearing",
     }
-	var dataSetTypes = []string{"'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'string';","'string';","'string';","'string';","'integer';",}
-    var dataSetUnits = []string{"'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'°F';","'knots';","'metershour';","'%rh';","'percent';","'°C';","'mb';","'°F';","'km';","'unicode';","'unicode';","'unicode';","'unicode';","'degree';", }
+	var dataSetTypes = []string{"'longint';", "'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'float';","'string';","'string';","'string';","'string';","'integer';",}
+    var dataSetUnits = []string{"'unixutc';", "'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'kW';","'°F';","'knots';","'metershour';","'%rh';","'percent';","'°C';","'mb';","'°F';","'km';","'unicode';","'unicode';","'unicode';","'unicode';","'degree';", }
     for n1,_ := range TimeseriesList {
         statements = append(statements, prefix0+TimeseriesList[n1]+attributes+dataSetTypes[n1])	
         statements = append(statements, prefix0+TimeseriesList[n1]+tags+dataSetUnits[n1])	

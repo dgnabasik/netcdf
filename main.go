@@ -76,8 +76,6 @@ func checkErr(title string, err error) {
 }
 
 // var xsdDatatypeMap = map[string]string{"string": "string", "int": "integer", "integer": "integer", "longint": "long", "int64": "long", "float": "decimal", "double": "decimal", "boolean": "byte", "datetime": "dateTime"} // map cdf to xsd datatypes.
-// var DiscreteDistributions = []string{"discreteUniform", "discreteBernoulli", "discreteBinomial", "discretePoisson"}
-// var ContinuousDistributions = []string{"continuousNormal", "continuousStudent_t_test", "continuousExponential", "continuousGamma", "continuousWeibull"}
 var NetcdfFileFormats = []string{"classic", "netCDF", "netCDF-4", "HDF5"}
 var rowsXsdMap = map[string]string{"dateTime": "datetime", "Unicode": "string", "unicode": "string", "Float": "float", "float": "float", "Integer": "integer", "integer": "integer", "Longint": "int64", "longint": "int64", "Double": "double", "double": "double"}
 
